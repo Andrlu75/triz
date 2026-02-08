@@ -697,3 +697,558 @@ class FullARIZMode:
             ],
         }
         return fields_by_part.get(part, [])
+
+    # ------------------------------------------------------------------
+    # Step result processing & entity extraction
+    # ------------------------------------------------------------------
+
+    def process_step_result(
+        self,
+        session: ARIZSession,
+        step_code: str,
+        llm_output: str,
+        user_input: str,
+    ) -> dict[str, Any]:
+        """
+        Process the LLM output for a completed step.
+
+        Performs validation, extracts structured entities (Contradiction,
+        IKR, Solution), updates the session context snapshot, and returns
+        a structured result dictionary.
+
+        Args:
+            session: The ARIZ session.
+            step_code: The step that was completed.
+            llm_output: The raw LLM response text.
+            user_input: The user's original input for this step.
+
+        Returns:
+            Dict with validated_result, validation_results,
+            extracted entities, and context update status.
+        """
+        step_def = self.get_step_by_code(step_code)
+        if step_def is None:
+            raise ValueError(f"Unknown step code: {step_code}")
+
+        # Run validators
+        validation_results: list[dict] = []
+        if step_def.validators:
+            validation_results = validate_step_output(
+                validator_names=step_def.validators,
+                content=llm_output,
+                context={"audience": self.AUDIENCE, "mode": self.MODE_NAME},
+            )
+
+        all_valid = all(r.get("valid", True) for r in validation_results)
+
+        # Build validation notes text
+        validation_notes = ""
+        if validation_results:
+            note_parts = []
+            for vr in validation_results:
+                validator_name = vr.get("validator", "")
+                if vr.get("valid"):
+                    note_parts.append(f"[{validator_name}] OK")
+                else:
+                    issues = "; ".join(vr.get("issues", []))
+                    note_parts.append(f"[{validator_name}] FAIL: {issues}")
+            validation_notes = " | ".join(note_parts)
+
+        # Update session context snapshot
+        context_key = CONTEXT_KEY_MAP.get(step_code)
+        if context_key:
+            snapshot = dict(session.context_snapshot or {})
+            snapshot[context_key] = llm_output[:3000]
+            session.context_snapshot = snapshot
+            session.save(update_fields=["context_snapshot"])
+
+        # Extract entities
+        entities = self._extract_entities(session, step_code, llm_output)
+
+        return {
+            "step_code": step_code,
+            "step_name": step_def.name,
+            "part": self.get_part_for_step(step_code),
+            "validated_result": llm_output,
+            "validation_results": validation_results,
+            "validation_notes": validation_notes,
+            "all_valid": all_valid,
+            "entities": entities,
+        }
+
+    def _extract_entities(
+        self,
+        session: ARIZSession,
+        step_code: str,
+        llm_output: str,
+    ) -> dict[str, Any]:
+        """
+        Extract structured entities from a step's LLM output.
+
+        Creates Contradiction, IKR, and Solution model instances as
+        appropriate for the given step.
+
+        Args:
+            session: The ARIZ session.
+            step_code: The step code.
+            llm_output: The LLM output text.
+
+        Returns:
+            Dict describing which entities were created/updated.
+        """
+        entities: dict[str, Any] = {}
+
+        # Contradiction extraction
+        if step_code in CONTRADICTION_STEPS:
+            contradiction = self._extract_contradiction(
+                session, step_code, llm_output
+            )
+            if contradiction:
+                entities["contradiction"] = {
+                    "id": contradiction.pk,
+                    "type": contradiction.type,
+                    "formulation": contradiction.formulation[:200],
+                }
+
+        # IKR extraction
+        if step_code in IKR_STEPS:
+            ikr = self._extract_ikr(session, step_code, llm_output)
+            if ikr:
+                entities["ikr"] = {
+                    "id": ikr.pk,
+                    "formulation": ikr.formulation[:200],
+                }
+
+        # Solution extraction
+        if step_code in SOLUTION_STEPS:
+            solution = self._extract_solution(session, step_code, llm_output)
+            if solution:
+                entities["solution"] = {
+                    "id": solution.pk,
+                    "title": solution.title,
+                    "method_used": solution.method_used,
+                }
+
+        return entities
+
+    def _extract_contradiction(
+        self,
+        session: ARIZSession,
+        step_code: str,
+        llm_output: str,
+    ) -> Contradiction | None:
+        """
+        Extract and persist a Contradiction from the LLM output.
+
+        Parses the output for property S and anti-S by keyword heuristics,
+        and creates or updates the Contradiction record.
+        """
+        contradiction_type = CONTRADICTION_STEPS.get(step_code)
+        if not contradiction_type:
+            return None
+
+        # Heuristic extraction of S / anti-S properties from output
+        property_s = ""
+        anti_property_s = ""
+        quality_a = ""
+        quality_b = ""
+
+        for line in llm_output.split("\n"):
+            stripped = line.strip().lower()
+            raw_value = line.split(":", 1)[-1].strip() if ":" in line else ""
+
+            if any(
+                kw in stripped
+                for kw in ["свойство s:", "свойство:", "property s:"]
+            ):
+                property_s = raw_value[:255]
+            elif any(
+                kw in stripped
+                for kw in [
+                    "анти-свойство:", "анти-s:", "anti-s:", "anti-property:",
+                ]
+            ):
+                anti_property_s = raw_value[:255]
+            elif "тп-1:" in stripped or "tp-1:" in stripped:
+                quality_a = raw_value[:255]
+            elif "тп-2:" in stripped or "tp-2:" in stripped:
+                quality_b = raw_value[:255]
+
+        contradiction, created = Contradiction.objects.update_or_create(
+            session=session,
+            type=contradiction_type,
+            defaults={
+                "formulation": llm_output[:2000],
+                "property_s": property_s,
+                "anti_property_s": anti_property_s,
+                "quality_a": quality_a,
+                "quality_b": quality_b,
+            },
+        )
+
+        logger.info(
+            "Contradiction %s (%s) for session %d — created=%s",
+            contradiction_type,
+            step_code,
+            session.pk,
+            created,
+        )
+        return contradiction
+
+    def _extract_ikr(
+        self,
+        session: ARIZSession,
+        step_code: str,
+        llm_output: str,
+    ) -> IKR | None:
+        """
+        Extract and persist an IKR record from the LLM output.
+
+        Steps 3.1/3.2 produce IKR-1. Step 3.5 produces IKR-2.
+        """
+        snapshot = session.context_snapshot or {}
+        vpr_data = snapshot.get("vpr_list", "")
+        vpr_list = [vpr_data] if vpr_data else []
+
+        if step_code in ("3.1", "3.2"):
+            label = "ИКР-1"
+            defaults = {
+                "formulation": f"{label}: {llm_output[:1500]}",
+                "vpr_used": vpr_list,
+            }
+            if step_code == "3.2":
+                defaults["strengthened_formulation"] = llm_output[:1500]
+
+            ikr, created = IKR.objects.update_or_create(
+                session=session,
+                formulation__startswith=label,
+                defaults=defaults,
+            )
+            logger.info(
+                "IKR-1 for session %d — step %s, created=%s",
+                session.pk,
+                step_code,
+                created,
+            )
+            return ikr
+
+        if step_code == "3.5":
+            label = "ИКР-2"
+            ikr, created = IKR.objects.update_or_create(
+                session=session,
+                formulation__startswith=label,
+                defaults={
+                    "formulation": f"{label}: {llm_output[:1500]}",
+                    "strengthened_formulation": "",
+                    "vpr_used": vpr_list,
+                },
+            )
+            logger.info(
+                "IKR-2 for session %d — step %s, created=%s",
+                session.pk,
+                step_code,
+                created,
+            )
+            return ikr
+
+        return None
+
+    def _extract_solution(
+        self,
+        session: ARIZSession,
+        step_code: str,
+        llm_output: str,
+    ) -> Solution | None:
+        """
+        Extract and persist a Solution from the LLM output.
+
+        Different steps map to different solution methods.
+        """
+        method = SOLUTION_STEPS.get(step_code)
+        if not method:
+            return None
+
+        step_def = self.get_step_by_code(step_code)
+        default_title = (
+            f"Решение (шаг {step_code}: {step_def.name})"
+            if step_def
+            else f"Решение (шаг {step_code})"
+        )
+
+        # Extract a meaningful title from the first non-trivial line
+        title = default_title
+        for line in llm_output.split("\n"):
+            stripped = line.strip()
+            if (
+                stripped
+                and len(stripped) > 10
+                and not stripped.startswith(("#", "```", "---", "**"))
+            ):
+                title = stripped[:255]
+                break
+
+        solution = Solution.objects.create(
+            session=session,
+            method_used=method,
+            title=title,
+            description=llm_output[:5000],
+            novelty_score=5,
+            feasibility_score=5,
+        )
+
+        logger.info(
+            "Solution created for session %d — step %s, method=%s",
+            session.pk,
+            step_code,
+            method,
+        )
+        return solution
+
+    # ------------------------------------------------------------------
+    # Response formatting (B2B)
+    # ------------------------------------------------------------------
+
+    def format_response(self, step_code: str, llm_output: str) -> str:
+        """
+        Format the LLM response for B2B display.
+
+        Prepends a structured header with part name, step name,
+        applicable rules, and step position information.
+
+        Args:
+            step_code: The current step code.
+            llm_output: The raw LLM output to format.
+
+        Returns:
+            Formatted response string with professional TRIZ header.
+        """
+        step_def = self.get_step_by_code(step_code)
+        if step_def is None:
+            return llm_output
+
+        part = self.get_part_for_step(step_code)
+        part_name = self.get_part_name(part)
+
+        # Part and step header
+        parts = [
+            f"### Часть {part}: {part_name}",
+            f"#### Шаг {step_code}: {step_def.name}",
+            "",
+        ]
+
+        # Applicable rules
+        rules = self.get_step_rules(step_code)
+        if rules:
+            rules_str = ", ".join(str(r) for r in rules)
+            parts.append(f"**Правила АРИЗ:** {rules_str}")
+            parts.append("")
+
+        # Step position
+        part_steps = self.get_steps_for_part(part)
+        step_in_part = 0
+        for i, s in enumerate(part_steps):
+            if s.code == step_code:
+                step_in_part = i + 1
+                break
+        parts.append(
+            f"*Шаг {step_in_part} из {len(part_steps)} в Части {part} "
+            f"({self.get_step_count()} шагов всего)*"
+        )
+        parts.append("")
+        parts.append("---")
+        parts.append("")
+
+        header = "\n".join(parts)
+        return header + llm_output
+
+    # ------------------------------------------------------------------
+    # Transition and loop-back logic
+    # ------------------------------------------------------------------
+
+    def should_loop_back(
+        self, step_code: str, llm_output: str
+    ) -> str | None:
+        """
+        Determine if the session should loop back to an earlier step.
+
+        ARIZ-2010 defines specific conditions where the analyst must
+        return to earlier parts:
+
+        - Step 1.7: If standards solve the task, the session could end
+          early, but in full mode we continue for completeness.
+        - Step 3.6: If the FP cannot be resolved by standard
+          transformations, return to step 1.1 with a new formulation.
+        - Step 4.6: If no solution is found after all Part 4 methods,
+          return to step 1.1 to reformulate the problem.
+
+        Args:
+            step_code: The current step code.
+            llm_output: The LLM output for this step.
+
+        Returns:
+            Step code to loop back to, or None to continue forward.
+        """
+        output_lower = llm_output.lower()
+
+        if step_code == "3.6":
+            loop_back_markers = [
+                "невозможно устранить",
+                "фп не разрешимо",
+                "не удаётся разрешить",
+                "вернуться к шагу 1",
+                "переформулировать задачу",
+                "возврат к части 1",
+            ]
+            if any(marker in output_lower for marker in loop_back_markers):
+                logger.info(
+                    "Step 3.6: FP cannot be resolved, "
+                    "recommending loop back to 1.1"
+                )
+                return "1.1"
+
+        if step_code == "4.6":
+            loop_back_markers = [
+                "задача не решена",
+                "решение не найдено",
+                "не удалось найти решение",
+                "изменить задачу",
+                "переформулировать",
+                "вернуться к части 1",
+            ]
+            if any(marker in output_lower for marker in loop_back_markers):
+                logger.info(
+                    "Step 4.6: Task not solved, "
+                    "recommending loop back to 1.1"
+                )
+                return "1.1"
+
+        return None
+
+    def can_complete_early(
+        self, step_code: str, llm_output: str
+    ) -> bool:
+        """
+        Check if the session can be completed early at the current step.
+
+        Step 1.7 checks standards applicability. If a standard directly
+        solves the task, the session may optionally end early (though
+        in full ARIZ we typically continue for thoroughness).
+
+        Args:
+            step_code: The current step code.
+            llm_output: The LLM output for this step.
+
+        Returns:
+            True if early completion is possible.
+        """
+        if step_code == "1.7":
+            output_lower = llm_output.lower()
+            early_markers = [
+                "задача решена стандартом",
+                "стандарт полностью решает",
+                "решение найдено через стандарт",
+            ]
+            return any(m in output_lower for m in early_markers)
+
+        return False
+
+    # ------------------------------------------------------------------
+    # Session summary
+    # ------------------------------------------------------------------
+
+    def build_session_summary(self, session: ARIZSession) -> dict[str, Any]:
+        """
+        Build a comprehensive session summary for reports and display.
+
+        Groups step results by part, includes all extracted entities,
+        context snapshot, and progress information.
+
+        Args:
+            session: The ARIZ session to summarize.
+
+        Returns:
+            Dict with full session data organized by parts.
+        """
+        problem = session.problem
+
+        # Collect step results grouped by part
+        parts_data: dict[int, list[dict[str, Any]]] = {
+            1: [], 2: [], 3: [], 4: [],
+        }
+        completed_codes: set[str] = set()
+
+        for sr in session.steps.order_by("created_at"):
+            part = self.get_part_for_step(sr.step_code)
+            parts_data.setdefault(part, []).append({
+                "code": sr.step_code,
+                "name": sr.step_name,
+                "status": sr.status,
+                "user_input": sr.user_input,
+                "result": sr.validated_result or sr.llm_output,
+                "validation_notes": sr.validation_notes,
+            })
+            if sr.status == "completed":
+                completed_codes.add(sr.step_code)
+
+        # Contradictions
+        contradictions = [
+            {
+                "type": c.type,
+                "quality_a": c.quality_a,
+                "quality_b": c.quality_b,
+                "property_s": c.property_s,
+                "anti_property_s": c.anti_property_s,
+                "formulation": c.formulation,
+            }
+            for c in session.contradictions.all()
+        ]
+
+        # IKRs
+        ikrs = [
+            {
+                "formulation": ikr.formulation,
+                "strengthened_formulation": ikr.strengthened_formulation,
+                "vpr_used": ikr.vpr_used,
+            }
+            for ikr in session.ikrs.all()
+        ]
+
+        # Solutions
+        solutions = [
+            {
+                "title": sol.title,
+                "description": sol.description,
+                "method_used": sol.method_used,
+                "novelty_score": sol.novelty_score,
+                "feasibility_score": sol.feasibility_score,
+            }
+            for sol in session.solutions.order_by("-novelty_score")
+        ]
+
+        # Progress
+        progress = self.get_full_progress(completed_codes)
+
+        return {
+            "session_id": session.pk,
+            "mode": self.MODE_NAME,
+            "status": session.status,
+            "problem": {
+                "id": problem.pk,
+                "title": problem.title,
+                "description": problem.original_description,
+                "domain": problem.domain,
+            },
+            "progress": progress,
+            "parts": {
+                part_num: {
+                    "name": self.get_part_name(part_num),
+                    "description": self.get_part_description(part_num),
+                    "steps": steps,
+                }
+                for part_num, steps in parts_data.items()
+            },
+            "contradictions": contradictions,
+            "ikrs": ikrs,
+            "solutions": solutions,
+            "context_snapshot": session.context_snapshot,
+        }
