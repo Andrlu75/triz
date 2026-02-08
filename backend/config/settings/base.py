@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "apps.ariz_engine",
     "apps.llm_service",
     "apps.knowledge_base",
+    "apps.reports",
 ]
 
 AUTH_USER_MODEL = "users.User"
