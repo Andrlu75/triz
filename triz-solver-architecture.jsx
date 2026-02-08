@@ -65,7 +65,7 @@ const layers = [
     bgColor: colors.purpleDark,
     items: [
       { name: "Prompt Manager", tech: "Jinja2 Templates", icon: "📝", desc: "Иерархия промптов: System → Role → Methodology → Step → Validation → Audience Adapter. Версионирование промптов." },
-      { name: "Claude API", tech: "Sonnet 4", icon: "🧠", desc: "Основная LLM. ~$0.02-0.05 за экспресс-задачу, ~$0.10-0.30 за полный АРИЗ. Стриминг ответов." },
+      { name: "OpenAI API", tech: "GPT-4o / GPT-4o-mini", icon: "🧠", desc: "Основная LLM: GPT-4o для анализа, GPT-4o-mini для валидации. ~$0.02-0.05 за экспресс-задачу, ~$0.10-0.30 за полный АРИЗ. Стриминг ответов." },
       { name: "Knowledge RAG", tech: "pgvector + embeddings", icon: "🔍", desc: "Поиск задач-аналогов по вектору ОП. Подбор релевантных приёмов и эффектов из информационного фонда ТРИЗ." },
     ],
   },
@@ -442,7 +442,7 @@ export default function ArchitectureDiagram() {
                   { name: "Lovable.dev (MVP)", why: "Быстрый прототип фронтенда" },
                 ], color: colors.cyan },
                 { category: "AI / ML", items: [
-                  { name: "Claude API (Sonnet 4)", why: "Лучшее качество/цена для анализа" },
+                  { name: "OpenAI API (GPT-4o)", why: "Основная LLM для анализа и генерации" },
                   { name: "Jinja2 Templates", why: "Шаблонизация 30+ промптов" },
                   { name: "pgvector Embeddings", why: "Поиск задач-аналогов по ОП" },
                   { name: "LangChain (optional)", why: "Оркестрация цепочек вызовов" },
@@ -487,7 +487,7 @@ export default function ArchitectureDiagram() {
             <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 32, marginBottom: 16 }}>MVP Roadmap (12 недель)</h3>
             <div style={{ display: "flex", gap: 8 }}>
               {[
-                { phase: "Ядро", weeks: "4 нед", tasks: "Django + АРИЗ-Engine + Claude API + Промпты", color: colors.green },
+                { phase: "Ядро", weeks: "4 нед", tasks: "Django + АРИЗ-Engine + OpenAI API + Промпты", color: colors.green },
                 { phase: "Фронтенд", weeks: "3 нед", tasks: "React SPA + чат-интерфейс + визуализация шагов", color: colors.cyan },
                 { phase: "Knowledge", weeks: "2 нед", tasks: "40 приёмов + эффекты + задачи-аналоги + RAG", color: colors.amber },
                 { phase: "B2B", weeks: "3 нед", tasks: "Полный АРИЗ + отчёты + биллинг + команды", color: colors.purple },

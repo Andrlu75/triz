@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ТРИЗ-Решатель — Техническое задание</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0e17; color: #e2e8f0; font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #111827; }
+  ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState } = React;
+
+const C = {
+  bg: "#0a0e17", card: "#111827", cardHover: "#1a2332",
+  border: "#1e293b", borderActive: "#3b82f6",
+  text: "#e2e8f0", muted: "#94a3b8", dim: "#64748b",
+  blue: "#3b82f6", blueLight: "#60a5fa",
+  green: "#10b981", greenDark: "#064e3b",
+  amber: "#f59e0b", amberDark: "#78350f",
+  purple: "#8b5cf6", purpleDark: "#4c1d95",
+  rose: "#f43f5e", roseDark: "#881337",
+  cyan: "#06b6d4", cyanDark: "#164e63",
+};
+
+const phases = [
+  {
+    id: "phase0", title: "ФАЗА 0", subtitle: "Инфраструктура", weeks: "2-3 дня", color: C.dim,
+    sections: [
+      { title: "Docker Compose", icon: "\u{1F433}", items: [
+        { name: "backend", desc: "Django 5, порт 8000" },
+        { name: "celery_worker", desc: "Celery worker для LLM-вызовов" },
+        { name: "celery_beat", desc: "Периодические задачи" },
+        { name: "db", desc: "PostgreSQL 16 + pgvector" },
+        { name: "redis", desc: "Redis 7 — кэш + очереди" },
+        { name: "frontend", desc: "React (Vite), порт 5173" },
+      ]},
+      { title: "Makefile", icon: "\u{2699}\u{FE0F}", items: [
+        { name: "make up / down", desc: "Запуск и остановка Docker Compose" },
+        { name: "make migrate", desc: "Миграции БД" },
+        { name: "make test", desc: "Запуск тестов" },
+        { name: "make load-triz", desc: "Загрузка базы знаний ТРИЗ" },
+      ]},
+      { title: "Переменные окружения", icon: "\u{1F511}", items: [
+        { name: "OPENAI_API_KEY", desc: "Ключ OpenAI API" },
+        { name: "DATABASE_URL", desc: "postgres://triz:triz@db:5432/triz_solver" },
+        { name: "REDIS_URL", desc: "redis://redis:6379/0" },
+        { name: "CELERY_BROKER_URL", desc: "redis://redis:6379/1" },
+      ]},
+    ]
+  },
+  {
+    id: "phase1", title: "ФАЗА 1", subtitle: "Ядро системы", weeks: "4 недели", color: C.green,
+    sections: [
+      { title: "Неделя 1.1 — Модели данных", icon: "\u{1F4CA}", items: [
+        { name: "User", desc: "plan (free/pro/business), organization, locale" },
+        { name: "Organization", desc: "name, created_at" },
+        { name: "Problem", desc: "title, description, mode, domain, status, final_report" },
+        { name: "ARIZSession", desc: "current_step, current_part, context_snapshot, status" },
+        { name: "StepResult", desc: "step_code, user_input, llm_output, validated_result, status" },
+        { name: "Contradiction", desc: "type (surface/deepened/sharpened), qualities, formulation" },
+        { name: "IKR", desc: "formulation, strengthened_formulation, vpr_used" },
+        { name: "Solution", desc: "method_used, title, description, novelty_score, feasibility_score" },
+      ]},
+      { title: "Неделя 1.2 — LLM-сервис (OpenAI)", icon: "\u{1F9E0}", items: [
+        { name: "OpenAIClient", desc: "GPT-4o (основная) + GPT-4o-mini (валидация). Retry 3x, timeout 120s" },
+        { name: "PromptManager", desc: "Jinja2-шаблоны: system + role + methodology + step + adapter" },
+        { name: "execute_ariz_step", desc: "Celery-задача: контекст \u2192 промпт \u2192 OpenAI \u2192 валидация \u2192 сохранение" },
+        { name: "create_embedding", desc: "text-embedding-3-small (dim=1536) для векторного поиска" },
+      ]},
+      { title: "Неделя 1.3 — АРИЗ-движок", icon: "\u{2699}\u{FE0F}", items: [
+        { name: "ARIZEngine", desc: "Оркестратор: start_session, submit_step, advance, go_back, get_progress" },
+        { name: "StepRegistry", desc: "EXPRESS_STEPS (7 шагов), FULL_STEPS (~24 шага) — источник правды" },
+        { name: "ExpressMode", desc: "7 шагов, бытовой язык, скрытая ТРИЗ-терминология" },
+        { name: "FullARIZMode", desc: "4 части, ~24 шага, полная терминология, 28 правил" },
+        { name: "AutopilotMode", desc: "1-3 вызова LLM, автоматическое прохождение всех шагов" },
+      ]},
+      { title: "Неделя 1.3 — Валидаторы", icon: "\u{2705}", items: [
+        { name: "FalsenessValidator", desc: "Проверка на ложность задачи (5 пунктов)" },
+        { name: "TermsValidator", desc: "Замена спецтерминов (правило 15)" },
+        { name: "ContradictionValidator", desc: "Формулировка УП (правило 19)" },
+        { name: "ConflictValidator", desc: "Усиление конфликта (правила 22-24)" },
+        { name: "FunctionValidator", desc: "Формулировка ГФ (правила 4-11)" },
+        { name: "IKRValidator", desc: "Проверка формулировки ИКР" },
+      ]},
+      { title: "Неделя 1.4 — REST API", icon: "\u{26A1}", items: [
+        { name: "POST /auth/register/", desc: "Регистрация пользователя" },
+        { name: "POST /auth/login/", desc: "JWT-авторизация" },
+        { name: "GET/POST /problems/", desc: "Список / создание задач" },
+        { name: "POST /sessions/start/", desc: "Начать АРИЗ-сессию {problem_id, mode}" },
+        { name: "POST /sessions/{id}/submit/", desc: "Отправить ввод \u2192 {task_id}" },
+        { name: "GET /sessions/{id}/task/{tid}/", desc: "Статус Celery-задачи (polling)" },
+        { name: "GET /sessions/{id}/current-step/", desc: "Текущий шаг + результат LLM" },
+        { name: "POST /sessions/{id}/advance/", desc: "Перейти к следующему шагу" },
+        { name: "GET /sessions/{id}/summary/", desc: "Полная сводка сессии" },
+      ]},
+      { title: "Неделя 1.4 — Промпты (Jinja2)", icon: "\u{1F4DD}", items: [
+        { name: "system/master.j2", desc: "Базовый системный промпт" },
+        { name: "system/role.j2", desc: "\u00ABЭксперт ТРИЗ с 30-летним опытом\u00BB" },
+        { name: "system/methodology.j2", desc: "35 определений + 28 правил + логика АРИЗ" },
+        { name: "steps/express/step_1-7.j2", desc: "7 промптов для Экспресс-режима" },
+        { name: "steps/full/step_1_1-4_8.j2", desc: "~24 промпта для полного АРИЗ" },
+        { name: "steps/autopilot/full_analysis.j2", desc: "Единый промпт для автопилота" },
+        { name: "validation/*.j2", desc: "6 промптов валидации (ложность, термины, УП, ОП, ГФ, ИКР)" },
+        { name: "adapters/b2c.j2 + b2b.j2", desc: "Адаптеры аудитории: бытовой / профессиональный" },
+      ]},
+    ]
+  },
+  {
+    id: "phase2", title: "ФАЗА 2", subtitle: "Фронтенд", weeks: "3 недели", color: C.cyan,
+    sections: [
+      { title: "Стек фронтенда", icon: "\u{1F528}", items: [
+        { name: "React + TypeScript", desc: "SPA, компонентный подход" },
+        { name: "Vite", desc: "Быстрая сборка и HMR" },
+        { name: "Tailwind CSS", desc: "Утилитарные стили, mobile-first" },
+        { name: "Zustand", desc: "Стейт-менеджмент (authStore, sessionStore)" },
+        { name: "Axios", desc: "HTTP-клиент с JWT interceptor" },
+      ]},
+      { title: "Неделя 2.1 — Каркас + Авторизация", icon: "\u{1F3D7}\u{FE0F}", items: [
+        { name: "HomePage.tsx", desc: "Лендинг с описанием + CTA" },
+        { name: "LoginPage / RegisterPage", desc: "Формы авторизации" },
+        { name: "DashboardPage.tsx", desc: "Список задач пользователя" },
+        { name: "NewProblemPage.tsx", desc: "Создание задачи, выбор режима" },
+        { name: "api/client.ts", desc: "Axios instance с JWT refresh" },
+        { name: "store/authStore.ts", desc: "Zustand: user, token, login/logout" },
+      ]},
+      { title: "Неделя 2.2 — Чат-интерфейс", icon: "\u{1F4AC}", items: [
+        { name: "SessionPage.tsx", desc: "ГЛАВНАЯ СТРАНИЦА \u2014 чат + прогресс + решения" },
+        { name: "ChatInterface.tsx", desc: "Диалог: LLM-ответы + ввод пользователя + Markdown" },
+        { name: "StepProgress.tsx", desc: "Вертикальный прогресс-бар шагов АРИЗ" },
+        { name: "UserInput.tsx", desc: "Textarea + кнопка + контекстные подсказки" },
+        { name: "ThinkingIndicator.tsx", desc: "Анимация \u00ABLLM думает...\u00BB при polling" },
+        { name: "LLMResponse.tsx", desc: "Карточка ответа + badge валидации" },
+        { name: "useStepPolling.ts", desc: "Polling с backoff: 1s \u2192 2s \u2192 3s" },
+      ]},
+      { title: "Неделя 2.3 — Решения + Адаптив", icon: "\u{1F4F1}", items: [
+        { name: "SolutionCard.tsx", desc: "Карточка: название, метод, новизна/реализуемость (1-10)" },
+        { name: "SolutionList.tsx", desc: "Список решений с сортировкой" },
+        { name: "SummaryPage.tsx", desc: "Итоговый отчёт с решениями" },
+        { name: "Адаптивный дизайн", desc: "Mobile-first, StepProgress сворачивается на мобильных" },
+      ]},
+    ]
+  },
+  {
+    id: "phase3", title: "ФАЗА 3", subtitle: "Информационный фонд", weeks: "2 недели", color: C.amber,
+    sections: [
+      { title: "Неделя 3.1 — Модели базы знаний", icon: "\u{1F4DA}", items: [
+        { name: "TRIZPrinciple", desc: "50 приёмов (40 + 10 доп.), парные приёмы-антиприёмы" },
+        { name: "TechnologicalEffect", desc: "Физ/хим/био/геом эффекты + embedding (dim=1536)" },
+        { name: "Standard", desc: "76 стандартов, 5 классов" },
+        { name: "AnalogTask", desc: "Задачи-аналоги + embedding для векторного поиска" },
+        { name: "Definition", desc: "35 определений (Приложение 4)" },
+        { name: "Rule", desc: "28 правил формулировок" },
+        { name: "TypicalTransformation", desc: "Таблица разрешения ОП" },
+      ]},
+      { title: "Неделя 3.1 — JSON-фикстуры", icon: "\u{1F4C1}", items: [
+        { name: "principles.json", desc: "50 приёмов устранения ТП" },
+        { name: "paired_principles.json", desc: "Пары приём-антиприём" },
+        { name: "effects_*.json", desc: "4 файла: физ, хим, био, геом эффекты" },
+        { name: "standards.json", desc: "76 стандартов" },
+        { name: "definitions.json + rules.json", desc: "35 определений + 28 правил" },
+        { name: "analog_tasks.json", desc: "Задачи-аналоги из Главы 6" },
+        { name: "load_triz_data.py", desc: "Management-команда загрузки + генерация эмбеддингов" },
+      ]},
+      { title: "Неделя 3.2 — Векторный поиск + API", icon: "\u{1F50D}", items: [
+        { name: "search_analog_tasks()", desc: "pgvector поиск аналогов по формулировке ОП" },
+        { name: "suggest_principles()", desc: "Подбор приёмов по типу противоречия" },
+        { name: "find_effects()", desc: "Поиск эффектов по описанию функции" },
+        { name: "GET /knowledge/principles/", desc: "Список приёмов" },
+        { name: "GET /knowledge/effects/?q=", desc: "Поиск эффектов" },
+        { name: "GET /knowledge/analogs/search/?q=", desc: "Поиск задач-аналогов (top_k=5)" },
+        { name: "GET /knowledge/standards/", desc: "Стандарты" },
+        { name: "GET /knowledge/definitions/", desc: "35 определений" },
+      ]},
+    ]
+  },
+  {
+    id: "phase4", title: "ФАЗА 4", subtitle: "B2B расширение", weeks: "3 недели", color: C.purple,
+    sections: [
+      { title: "Неделя 4.1 — Полный АРИЗ-2010", icon: "\u{1F52C}", items: [
+        { name: "Часть 1: Анализ задачи", desc: "Шаги 1.1-1.7, мини-задача, конфликтующая пара, УП, модель" },
+        { name: "Часть 2: Анализ ресурсов", desc: "Шаги 2.1-2.3, ОЗ, ОВ, ВПР" },
+        { name: "Часть 3: Определение ОП", desc: "Шаги 3.1-3.6, ИКР, усиление, углубление ОП" },
+        { name: "Часть 4: Получение решения", desc: "Шаги 4.1-4.8, параллельный поиск по 8 инструментам" },
+        { name: "~24 промпта (full/)", desc: "По одному Jinja2-шаблону на каждый шаг" },
+        { name: "Интеграция базы знаний", desc: "Поиск аналогов, приёмы, эффекты в шагах Части 4" },
+      ]},
+      { title: "Неделя 4.2 — Генерация отчётов", icon: "\u{1F4C4}", items: [
+        { name: "PDFReportGenerator", desc: "ReportLab: титул \u2192 задача \u2192 шаги по частям \u2192 решения" },
+        { name: "DOCXReportGenerator", desc: "python-docx: редактируемый формат, аналогичная структура" },
+        { name: "Кириллица", desc: "Шрифт DejaVu Sans / PT Sans" },
+        { name: "GET /reports/{id}/download/pdf/", desc: "Скачать PDF-отчёт" },
+        { name: "GET /reports/{id}/download/docx/", desc: "Скачать DOCX-отчёт" },
+      ]},
+      { title: "Неделя 4.3 — Команды + Биллинг", icon: "\u{1F465}", items: [
+        { name: "OrganizationMembership", desc: "Роли: admin / member / viewer" },
+        { name: "ProblemShare", desc: "Доступ: view / comment / edit" },
+        { name: "Free план", desc: "5 задач/мес, только Express" },
+        { name: "Pro план", desc: "50 задач/мес, Express + Autopilot, отчёты" },
+        { name: "Business план", desc: "Безлимит, все режимы, команды, отчёты" },
+        { name: "Middleware лимитов", desc: "Проверка плана перед каждым действием" },
+      ]},
+    ]
+  },
+];
+
+const arizFlow = [
+  { step: "1", name: "Формулировка задачи", desc: "Пользователь описывает проблему", color: C.muted, action: "validate_falseness" },
+  { step: "2", name: "Поверхностное противоречие (ПП)", desc: "Выявление НЭ", color: C.cyan, action: "validate_terms" },
+  { step: "3", name: "Углублённое противоречие (УП)", desc: "УП\u2081, УП\u2082 \u2192 выбор УП", color: C.blue, action: "validate_contradiction" },
+  { step: "4", name: "Идеальный конечный результат (ИКР)", desc: "Формулировка идеала", color: C.green, action: "validate_ikr" },
+  { step: "5", name: "Обострённое противоречие (ОП)", desc: "Нужно одновременно...", color: C.purple, action: "validate_conflict" },
+  { step: "6", name: "Углубление ОП (ОП\u2081)", desc: "Почему именно...", color: C.amber, action: "\u2014" },
+  { step: "7", name: "Решение", desc: "Пространство / время / структура / условие", color: C.rose, action: "\u2014" },
+];
+
+const techStack = [
+  { cat: "Backend", color: C.green, items: [
+    { name: "Django 5 + DRF", desc: "API, модели, авторизация" },
+    { name: "Celery + Redis", desc: "Async LLM-вызовы, фоновые задачи" },
+    { name: "PostgreSQL 16 + pgvector", desc: "Данные + векторный поиск" },
+    { name: "Jinja2", desc: "Шаблонизация 30+ промптов" },
+  ]},
+  { cat: "Frontend", color: C.cyan, items: [
+    { name: "React + TypeScript", desc: "SPA, компонентный подход" },
+    { name: "Vite", desc: "Сборка + HMR" },
+    { name: "Tailwind CSS", desc: "Утилитарные стили" },
+    { name: "Zustand", desc: "Стейт-менеджмент" },
+  ]},
+  { cat: "AI / ML", color: C.purple, items: [
+    { name: "OpenAI GPT-4o", desc: "Основная LLM для анализа" },
+    { name: "OpenAI GPT-4o-mini", desc: "Валидация (снижение стоимости)" },
+    { name: "text-embedding-3-small", desc: "Эмбеддинги (dim=1536)" },
+    { name: "pgvector", desc: "Векторный поиск аналогов по ОП" },
+  ]},
+  { cat: "Инфраструктура", color: C.amber, items: [
+    { name: "Docker Compose", desc: "Локальная разработка" },
+    { name: "Redis 7", desc: "Кэш + очереди Celery" },
+    { name: "ReportLab + python-docx", desc: "Генерация PDF/DOCX" },
+    { name: "pytest + factory-boy", desc: "Тестирование" },
+  ]},
+];
+
+const dbMigrations = [
+  { order: 1, app: "users", migration: "0001", desc: "User, Organization", phase: 1 },
+  { order: 2, app: "problems", migration: "0001", desc: "Problem", phase: 1 },
+  { order: 3, app: "ariz_engine", migration: "0001", desc: "ARIZSession, StepResult, Contradiction, IKR, Solution", phase: 1 },
+  { order: 4, app: "knowledge_base", migration: "0001", desc: "CREATE EXTENSION vector", phase: 3 },
+  { order: 5, app: "knowledge_base", migration: "0002", desc: "TRIZPrinciple, Effect, Standard, AnalogTask, Definition, Rule", phase: 3 },
+  { order: 6, app: "users", migration: "0002", desc: "OrganizationMembership", phase: 4 },
+  { order: 7, app: "problems", migration: "0002", desc: "ProblemShare", phase: 4 },
+];
+
+const taskList = [
+  { phase: "ФАЗА 0", subtitle: "Инфраструктура", color: C.dim, weeks: "2-3 дня", sysId: [48], tasks: [
+    { id: "0.1", title: "Инициализация Git-репозитория", file: ".gitignore, README.md", priority: "high", hours: 0.5 },
+    { id: "0.2", title: "Создать Dockerfile для backend", file: "backend/Dockerfile", priority: "high", hours: 1 },
+    { id: "0.3", title: "Создать Dockerfile для frontend", file: "frontend/Dockerfile", priority: "high", hours: 1 },
+    { id: "0.4", title: "Настроить docker-compose.yml (6 сервисов)", file: "docker-compose.yml", priority: "high", hours: 2 },
+    { id: "0.5", title: "Создать docker-compose.dev.yml (hot-reload)", file: "docker-compose.dev.yml", priority: "medium", hours: 1 },
+    { id: "0.6", title: "Создать .env.example с переменными", file: ".env.example", priority: "high", hours: 0.5 },
+    { id: "0.7", title: "Инициализировать Django-проект (config/)", file: "backend/config/", priority: "high", hours: 1 },
+    { id: "0.8", title: "Настроить settings/base.py и settings/dev.py", file: "backend/config/settings/", priority: "high", hours: 2 },
+    { id: "0.9", title: "Настроить Celery (celery.py + __init__)", file: "backend/config/celery.py", priority: "high", hours: 1 },
+    { id: "0.10", title: "Создать requirements/base.txt и dev.txt", file: "backend/requirements/", priority: "high", hours: 1 },
+    { id: "0.11", title: "Инициализировать React (Vite + TS + Tailwind)", file: "frontend/", priority: "high", hours: 2 },
+    { id: "0.12", title: "Создать Makefile с командами dev", file: "Makefile", priority: "medium", hours: 1 },
+    { id: "0.13", title: "Проверить docker compose up (все сервисы)", file: "\u2014", priority: "high", hours: 1 },
+  ]},
+  { phase: "ФАЗА 1 \u2014 Неделя 1", subtitle: "Модели данных", color: C.green, weeks: "Неделя 1", sysId: [49], tasks: [
+    { id: "1.1", title: "Создать Django-app users", file: "backend/apps/users/", priority: "high", hours: 1 },
+    { id: "1.2", title: "Модель User (AbstractUser + plan, locale)", file: "apps/users/models.py", priority: "high", hours: 2 },
+    { id: "1.3", title: "Модель Organization", file: "apps/users/models.py", priority: "medium", hours: 1 },
+    { id: "1.4", title: "Создать Django-app problems", file: "backend/apps/problems/", priority: "high", hours: 1 },
+    { id: "1.5", title: "Модель Problem (title, mode, domain, status)", file: "apps/problems/models.py", priority: "high", hours: 2 },
+    { id: "1.6", title: "Создать Django-app ariz_engine", file: "backend/apps/ariz_engine/", priority: "high", hours: 1 },
+    { id: "1.7", title: "Модель ARIZSession (step, part, snapshot)", file: "apps/ariz_engine/models.py", priority: "high", hours: 2 },
+    { id: "1.8", title: "Модель StepResult (input, output, validated)", file: "apps/ariz_engine/models.py", priority: "high", hours: 2 },
+    { id: "1.9", title: "Модель Contradiction (surface/deep/sharp)", file: "apps/ariz_engine/models.py", priority: "high", hours: 1 },
+    { id: "1.10", title: "Модель IKR (formulation, strengthened)", file: "apps/ariz_engine/models.py", priority: "medium", hours: 1 },
+    { id: "1.11", title: "Модель Solution (method, novelty, feasibility)", file: "apps/ariz_engine/models.py", priority: "high", hours: 1 },
+    { id: "1.12", title: "Admin-регистрация всех моделей", file: "apps/*/admin.py", priority: "low", hours: 1 },
+    { id: "1.13", title: "Миграции + проверка в БД", file: "\u2014", priority: "high", hours: 1 },
+    { id: "1.14", title: "Тесты моделей (test_models.py)", file: "tests/test_models.py", priority: "medium", hours: 3 },
+  ]},
+  { phase: "ФАЗА 1 \u2014 Неделя 2", subtitle: "LLM-сервис (OpenAI)", color: C.green, weeks: "Неделя 2", sysId: [50], tasks: [
+    { id: "1.15", title: "Создать Django-app llm_service", file: "backend/apps/llm_service/", priority: "high", hours: 1 },
+    { id: "1.16", title: "OpenAIClient \u2014 обёртка над openai.OpenAI", file: "apps/llm_service/client.py", priority: "high", hours: 4 },
+    { id: "1.17", title: "Retry-логика (3 попытки, exp backoff)", file: "apps/llm_service/client.py", priority: "high", hours: 2 },
+    { id: "1.18", title: "Подсчёт стоимости (calculate_cost)", file: "apps/llm_service/client.py", priority: "medium", hours: 1 },
+    { id: "1.19", title: "PromptManager \u2014 Jinja2 загрузка шаблонов", file: "apps/llm_service/prompt_manager.py", priority: "high", hours: 4 },
+    { id: "1.20", title: "render_system_prompt(mode, audience)", file: "apps/llm_service/prompt_manager.py", priority: "high", hours: 2 },
+    { id: "1.21", title: "render_step_prompt(step_code, context)", file: "apps/llm_service/prompt_manager.py", priority: "high", hours: 2 },
+    { id: "1.22", title: "render_validation_prompt(rules, content)", file: "apps/llm_service/prompt_manager.py", priority: "medium", hours: 2 },
+    { id: "1.23", title: "Celery-задача execute_ariz_step()", file: "apps/llm_service/tasks.py", priority: "high", hours: 6 },
+    { id: "1.24", title: "Тесты LLM-клиента (мок openai)", file: "tests/test_llm_client.py", priority: "medium", hours: 3 },
+    { id: "1.25", title: "Тесты промптов (рендеринг, наличие)", file: "tests/test_prompts.py", priority: "medium", hours: 2 },
+    { id: "1.26", title: "Тесты Celery-задач (мок LLM)", file: "tests/test_tasks.py", priority: "medium", hours: 3 },
+  ]},
+  { phase: "ФАЗА 1 \u2014 Неделя 3", subtitle: "АРИЗ-движок + Валидаторы", color: C.green, weeks: "Неделя 3", sysId: [51], tasks: [
+    { id: "1.27", title: "StepDef dataclass + StepRegistry", file: "apps/ariz_engine/steps/registry.py", priority: "high", hours: 3 },
+    { id: "1.28", title: "EXPRESS_STEPS (7 шагов с промптами)", file: "apps/ariz_engine/steps/registry.py", priority: "high", hours: 2 },
+    { id: "1.29", title: "FULL_STEPS (~24 шага, заглушки)", file: "apps/ariz_engine/steps/registry.py", priority: "medium", hours: 2 },
+    { id: "1.30", title: "ARIZEngine \u2014 основной оркестратор", file: "apps/ariz_engine/engine.py", priority: "high", hours: 8 },
+    { id: "1.31", title: "start_session() \u2014 инициализация", file: "apps/ariz_engine/engine.py", priority: "high", hours: 2 },
+    { id: "1.32", title: "submit_step() \u2192 Celery task_id", file: "apps/ariz_engine/engine.py", priority: "high", hours: 3 },
+    { id: "1.33", title: "advance_to_next() / go_back()", file: "apps/ariz_engine/engine.py", priority: "high", hours: 2 },
+    { id: "1.34", title: "get_progress() / get_session_summary()", file: "apps/ariz_engine/engine.py", priority: "medium", hours: 2 },
+    { id: "1.35", title: "ExpressMode \u2014 7 шагов, B2C формат", file: "apps/ariz_engine/modes/express.py", priority: "high", hours: 4 },
+    { id: "1.36", title: "AutopilotMode \u2014 авто-прохождение", file: "apps/ariz_engine/modes/autopilot.py", priority: "medium", hours: 4 },
+    { id: "1.37", title: "FalsenessValidator (5 пунктов)", file: "apps/ariz_engine/validators/base.py", priority: "high", hours: 3 },
+    { id: "1.38", title: "TermsValidator (правило 15)", file: "apps/ariz_engine/validators/base.py", priority: "high", hours: 2 },
+    { id: "1.39", title: "ContradictionValidator (правило 19)", file: "apps/ariz_engine/validators/base.py", priority: "high", hours: 2 },
+    { id: "1.40", title: "ConflictValidator (правила 22-24)", file: "apps/ariz_engine/validators/base.py", priority: "medium", hours: 2 },
+    { id: "1.41", title: "FunctionValidator (правила 4-11)", file: "apps/ariz_engine/validators/base.py", priority: "medium", hours: 2 },
+    { id: "1.42", title: "IKRValidator", file: "apps/ariz_engine/validators/base.py", priority: "medium", hours: 2 },
+    { id: "1.43", title: "Тесты движка (test_engine.py)", file: "tests/test_engine.py", priority: "medium", hours: 4 },
+    { id: "1.44", title: "Тесты валидаторов (test_validators.py)", file: "tests/test_validators.py", priority: "medium", hours: 3 },
+  ]},
+  { phase: "ФАЗА 1 \u2014 Неделя 4", subtitle: "REST API + Промпты", color: C.green, weeks: "Неделя 4", sysId: [52, 53], tasks: [
+    { id: "1.45", title: "Сериализаторы users (User, Auth)", file: "apps/users/serializers.py", priority: "high", hours: 2 },
+    { id: "1.46", title: "Views: register, login, refresh (JWT)", file: "apps/users/views.py", priority: "high", hours: 3 },
+    { id: "1.47", title: "Сериализаторы problems (Problem)", file: "apps/problems/serializers.py", priority: "high", hours: 2 },
+    { id: "1.48", title: "Views: CRUD problems (ViewSet)", file: "apps/problems/views.py", priority: "high", hours: 2 },
+    { id: "1.49", title: "Сериализаторы ariz_engine (Session, Step)", file: "apps/ariz_engine/serializers.py", priority: "high", hours: 3 },
+    { id: "1.50", title: "Views: start, submit, advance, back, progress, summary", file: "apps/ariz_engine/views.py", priority: "high", hours: 6 },
+    { id: "1.51", title: "View: task_status (Celery AsyncResult)", file: "apps/ariz_engine/views.py", priority: "high", hours: 2 },
+    { id: "1.52", title: "Настроить config/urls.py (все роуты)", file: "config/urls.py", priority: "high", hours: 2 },
+    { id: "1.53", title: "Промпт: system/master.j2", file: "prompts/system/master.j2", priority: "high", hours: 3 },
+    { id: "1.54", title: "Промпт: system/role.j2", file: "prompts/system/role.j2", priority: "high", hours: 2 },
+    { id: "1.55", title: "Промпт: system/methodology.j2 (35 опр + 28 правил)", file: "prompts/system/methodology.j2", priority: "high", hours: 6 },
+    { id: "1.56", title: "Промпты: steps/express/step_1-7.j2 (7 файлов)", file: "prompts/steps/express/", priority: "high", hours: 8 },
+    { id: "1.57", title: "Промпт: steps/autopilot/full_analysis.j2", file: "prompts/steps/autopilot/", priority: "medium", hours: 4 },
+    { id: "1.58", title: "Промпты: validation/*.j2 (6 файлов)", file: "prompts/validation/", priority: "high", hours: 6 },
+    { id: "1.59", title: "Промпты: adapters/b2c.j2, b2b.j2", file: "prompts/adapters/", priority: "medium", hours: 2 },
+    { id: "1.60", title: "Тесты API (test_api.py)", file: "tests/test_api.py", priority: "medium", hours: 5 },
+    { id: "1.61", title: "E2E тест: полный цикл Express через API", file: "tests/test_api.py", priority: "medium", hours: 4 },
+  ]},
+  { phase: "ФАЗА 2 \u2014 Неделя 5", subtitle: "Фронтенд: каркас + авторизация", color: C.cyan, weeks: "Неделя 5", sysId: [54], tasks: [
+    { id: "2.1", title: "Настроить Tailwind CSS + тёмная тема", file: "frontend/tailwind.config.ts", priority: "high", hours: 2 },
+    { id: "2.2", title: "API-клиент (axios + JWT interceptor)", file: "src/api/client.ts", priority: "high", hours: 3 },
+    { id: "2.3", title: "TypeScript типы (Problem, Session, Step...)", file: "src/api/types.ts", priority: "high", hours: 2 },
+    { id: "2.4", title: "API модули: auth.ts, problems.ts, sessions.ts", file: "src/api/", priority: "high", hours: 4 },
+    { id: "2.5", title: "Zustand authStore (user, token, login/logout)", file: "src/store/authStore.ts", priority: "high", hours: 2 },
+    { id: "2.6", title: "Zustand sessionStore (session, steps, solutions)", file: "src/store/sessionStore.ts", priority: "high", hours: 3 },
+    { id: "2.7", title: "Layout (Header + Sidebar + main)", file: "src/components/layout/", priority: "high", hours: 3 },
+    { id: "2.8", title: "LoginPage + RegisterPage", file: "src/pages/", priority: "high", hours: 4 },
+    { id: "2.9", title: "HomePage (лендинг + CTA)", file: "src/pages/HomePage.tsx", priority: "medium", hours: 3 },
+    { id: "2.10", title: "DashboardPage (список задач)", file: "src/pages/DashboardPage.tsx", priority: "high", hours: 3 },
+    { id: "2.11", title: "NewProblemPage (создание + выбор режима)", file: "src/pages/NewProblemPage.tsx", priority: "high", hours: 3 },
+    { id: "2.12", title: "React Router (маршрутизация + guards)", file: "src/App.tsx", priority: "high", hours: 2 },
+  ]},
+  { phase: "ФАЗА 2 \u2014 Неделя 6", subtitle: "Чат-интерфейс (SessionPage)", color: C.cyan, weeks: "Неделя 6", sysId: [55], tasks: [
+    { id: "2.13", title: "SessionPage \u2014 основная страница", file: "src/pages/SessionPage.tsx", priority: "high", hours: 4 },
+    { id: "2.14", title: "ChatInterface (диалог + автоскролл)", file: "src/components/session/ChatInterface.tsx", priority: "high", hours: 6 },
+    { id: "2.15", title: "StepProgress (вертикальный прогресс-бар)", file: "src/components/session/StepProgress.tsx", priority: "high", hours: 4 },
+    { id: "2.16", title: "UserInput (textarea + подсказки + disabled)", file: "src/components/session/UserInput.tsx", priority: "high", hours: 3 },
+    { id: "2.17", title: "ThinkingIndicator (анимация ожидания)", file: "src/components/session/ThinkingIndicator.tsx", priority: "medium", hours: 2 },
+    { id: "2.18", title: "LLMResponse (карточка + Markdown + badge)", file: "src/components/session/LLMResponse.tsx", priority: "high", hours: 3 },
+    { id: "2.19", title: "useStepPolling хук (polling + backoff)", file: "src/hooks/useStepPolling.ts", priority: "high", hours: 4 },
+    { id: "2.20", title: "useSession хук (submit, advance, back)", file: "src/hooks/useSession.ts", priority: "high", hours: 3 },
+    { id: "2.21", title: "UI-компоненты: Button, Input, Modal, Spinner", file: "src/components/common/", priority: "medium", hours: 3 },
+    { id: "2.22", title: "MarkdownRenderer (react-markdown)", file: "src/components/common/MarkdownRenderer.tsx", priority: "medium", hours: 2 },
+  ]},
+  { phase: "ФАЗА 2 \u2014 Неделя 7", subtitle: "Решения + Адаптивный дизайн", color: C.cyan, weeks: "Неделя 7", sysId: [56], tasks: [
+    { id: "2.23", title: "SolutionCard (название, метод, оценки)", file: "src/components/solutions/SolutionCard.tsx", priority: "high", hours: 3 },
+    { id: "2.24", title: "SolutionList (сортировка: новизна/реализуемость)", file: "src/components/solutions/SolutionList.tsx", priority: "high", hours: 2 },
+    { id: "2.25", title: "SummaryPage (итоговый отчёт)", file: "src/pages/SummaryPage.tsx", priority: "high", hours: 4 },
+    { id: "2.26", title: "Адаптивный дизайн (mobile breakpoints)", file: "\u2014", priority: "high", hours: 6 },
+    { id: "2.27", title: "StepProgress мобильная версия (горизонтальная)", file: "src/components/session/StepProgress.tsx", priority: "medium", hours: 3 },
+    { id: "2.28", title: "Тесты: ChatInterface.test.tsx", file: "src/__tests__/", priority: "medium", hours: 3 },
+    { id: "2.29", title: "Тесты: StepProgress.test.tsx", file: "src/__tests__/", priority: "medium", hours: 2 },
+    { id: "2.30", title: "Тесты: useStepPolling.test.ts", file: "src/__tests__/", priority: "medium", hours: 3 },
+    { id: "2.31", title: "Интеграционное тестирование фронт + бэк", file: "\u2014", priority: "high", hours: 4 },
+  ]},
+  { phase: "ФАЗА 3 \u2014 Неделя 8", subtitle: "Модели базы знаний + JSON", color: C.amber, weeks: "Неделя 8", sysId: [57], tasks: [
+    { id: "3.1", title: "Создать Django-app knowledge_base", file: "backend/apps/knowledge_base/", priority: "high", hours: 1 },
+    { id: "3.2", title: "Миграция: CREATE EXTENSION vector", file: "knowledge_base/migrations/", priority: "high", hours: 1 },
+    { id: "3.3", title: "Модель TRIZPrinciple (50 приёмов)", file: "apps/knowledge_base/models.py", priority: "high", hours: 2 },
+    { id: "3.4", title: "Модель TechnologicalEffect + VectorField", file: "apps/knowledge_base/models.py", priority: "high", hours: 2 },
+    { id: "3.5", title: "Модель Standard (76 стандартов)", file: "apps/knowledge_base/models.py", priority: "high", hours: 1 },
+    { id: "3.6", title: "Модель AnalogTask + VectorField", file: "apps/knowledge_base/models.py", priority: "high", hours: 2 },
+    { id: "3.7", title: "Модели Definition, Rule, TypicalTransformation", file: "apps/knowledge_base/models.py", priority: "medium", hours: 2 },
+    { id: "3.8", title: "JSON: principles.json (50 приёмов)", file: "knowledge_base/fixtures/", priority: "high", hours: 6 },
+    { id: "3.9", title: "JSON: paired_principles.json", file: "knowledge_base/fixtures/", priority: "medium", hours: 2 },
+    { id: "3.10", title: "JSON: effects_*.json (4 файла)", file: "knowledge_base/fixtures/", priority: "high", hours: 8 },
+    { id: "3.11", title: "JSON: standards.json (76 стандартов)", file: "knowledge_base/fixtures/", priority: "high", hours: 6 },
+    { id: "3.12", title: "JSON: definitions.json + rules.json", file: "knowledge_base/fixtures/", priority: "medium", hours: 4 },
+    { id: "3.13", title: "JSON: analog_tasks.json (Глава 6)", file: "knowledge_base/fixtures/", priority: "high", hours: 6 },
+    { id: "3.14", title: "Management-команда load_triz_data --all", file: "knowledge_base/management/commands/", priority: "high", hours: 4 },
+  ]},
+  { phase: "ФАЗА 3 \u2014 Неделя 9", subtitle: "Векторный поиск + API знаний", color: C.amber, weeks: "Неделя 9", sysId: [58], tasks: [
+    { id: "3.15", title: "Embeddings: OpenAI text-embedding-3-small", file: "apps/llm_service/embeddings.py", priority: "high", hours: 4 },
+    { id: "3.16", title: "Батчевая генерация эмбеддингов при загрузке", file: "apps/llm_service/embeddings.py", priority: "high", hours: 3 },
+    { id: "3.17", title: "TRIZKnowledgeSearch.search_analog_tasks()", file: "apps/knowledge_base/search.py", priority: "high", hours: 4 },
+    { id: "3.18", title: "TRIZKnowledgeSearch.suggest_principles()", file: "apps/knowledge_base/search.py", priority: "high", hours: 3 },
+    { id: "3.19", title: "TRIZKnowledgeSearch.find_effects()", file: "apps/knowledge_base/search.py", priority: "medium", hours: 3 },
+    { id: "3.20", title: "API: GET /knowledge/principles/ (ViewSet)", file: "apps/knowledge_base/views.py", priority: "high", hours: 3 },
+    { id: "3.21", title: "API: GET /knowledge/analogs/search/?q=", file: "apps/knowledge_base/views.py", priority: "high", hours: 3 },
+    { id: "3.22", title: "API: GET /knowledge/effects, standards, defs, rules", file: "apps/knowledge_base/views.py", priority: "medium", hours: 4 },
+    { id: "3.23", title: "Интеграция знаний в execute_ariz_step", file: "apps/llm_service/tasks.py", priority: "high", hours: 4 },
+    { id: "3.24", title: "Тест: test_vector_search.py", file: "tests/test_vector_search.py", priority: "medium", hours: 3 },
+    { id: "3.25", title: "Тест: test_load_triz_data.py", file: "tests/test_load_triz_data.py", priority: "medium", hours: 2 },
+    { id: "3.26", title: "Тест: test_knowledge_api.py", file: "tests/test_knowledge_api.py", priority: "medium", hours: 3 },
+  ]},
+  { phase: "ФАЗА 4 \u2014 Неделя 10", subtitle: "Полный АРИЗ-2010", color: C.purple, weeks: "Неделя 10", sysId: [59], tasks: [
+    { id: "4.1", title: "FullARIZMode \u2014 4 части, state machine", file: "apps/ariz_engine/modes/full.py", priority: "high", hours: 8 },
+    { id: "4.2", title: "FULL_STEPS \u2014 полный реестр ~24 шагов", file: "apps/ariz_engine/steps/registry.py", priority: "high", hours: 4 },
+    { id: "4.3", title: "Промпты: steps/full/step_1_1 \u2013 step_1_7 (Ч.1)", file: "prompts/steps/full/", priority: "high", hours: 8 },
+    { id: "4.4", title: "Промпты: steps/full/step_2_1 \u2013 step_2_3 (Ч.2)", file: "prompts/steps/full/", priority: "high", hours: 4 },
+    { id: "4.5", title: "Промпты: steps/full/step_3_1 \u2013 step_3_6 (Ч.3)", file: "prompts/steps/full/", priority: "high", hours: 6 },
+    { id: "4.6", title: "Промпты: steps/full/step_4_1 \u2013 step_4_8 (Ч.4)", file: "prompts/steps/full/", priority: "high", hours: 8 },
+    { id: "4.7", title: "Интеграция базы знаний в шаги Части 4", file: "apps/ariz_engine/modes/full.py", priority: "high", hours: 6 },
+    { id: "4.8", title: "Фронтенд: поддержка multi-part UI", file: "src/components/session/", priority: "medium", hours: 4 },
+  ]},
+  { phase: "ФАЗА 4 \u2014 Неделя 11", subtitle: "Отчёты PDF/DOCX", color: C.purple, weeks: "Неделя 11", sysId: [60], tasks: [
+    { id: "4.9", title: "Создать Django-app reports", file: "backend/apps/reports/", priority: "high", hours: 1 },
+    { id: "4.10", title: "PDFReportGenerator (ReportLab + кириллица)", file: "apps/reports/generators/pdf_generator.py", priority: "high", hours: 8 },
+    { id: "4.11", title: "DOCXReportGenerator (python-docx)", file: "apps/reports/generators/docx_generator.py", priority: "high", hours: 6 },
+    { id: "4.12", title: "API: GET /reports/{id}/download/pdf/", file: "apps/reports/views.py", priority: "high", hours: 2 },
+    { id: "4.13", title: "API: GET /reports/{id}/download/docx/", file: "apps/reports/views.py", priority: "high", hours: 2 },
+    { id: "4.14", title: "Фронтенд: кнопка скачивания отчёта", file: "src/pages/SummaryPage.tsx", priority: "medium", hours: 2 },
+    { id: "4.15", title: "Тест: test_report_generation.py", file: "tests/test_report_generation.py", priority: "medium", hours: 3 },
+  ]},
+  { phase: "ФАЗА 4 \u2014 Неделя 12", subtitle: "Команды + Биллинг + Финал", color: C.purple, weeks: "Неделя 12", sysId: [61], tasks: [
+    { id: "4.16", title: "Модель OrganizationMembership (roles)", file: "apps/users/models.py", priority: "medium", hours: 2 },
+    { id: "4.17", title: "Модель ProblemShare (permissions)", file: "apps/problems/models.py", priority: "medium", hours: 2 },
+    { id: "4.18", title: "API: управление командой + шаринг задач", file: "apps/users/views.py", priority: "medium", hours: 4 },
+    { id: "4.19", title: "Биллинг: PLAN_LIMITS (free/pro/business)", file: "apps/users/billing.py", priority: "high", hours: 3 },
+    { id: "4.20", title: "Middleware проверки лимитов", file: "apps/users/billing.py", priority: "high", hours: 3 },
+    { id: "4.21", title: "Фронтенд: страница тарифов", file: "src/pages/PricingPage.tsx", priority: "medium", hours: 4 },
+    { id: "4.22", title: "E2E тест: полный цикл Express", file: "tests/test_full_express_flow.py", priority: "high", hours: 4 },
+    { id: "4.23", title: "E2E тест: полный цикл Full АРИЗ", file: "tests/test_full_ariz_flow.py", priority: "medium", hours: 4 },
+    { id: "4.24", title: "Тест: test_plan_limits.py", file: "tests/test_plan_limits.py", priority: "medium", hours: 2 },
+    { id: "4.25", title: "Финальная проверка + баг-фикс", file: "\u2014", priority: "high", hours: 8 },
+  ]},
+];
+
+const stats = [
+  { label: "Задач", value: "156", color: C.rose },
+  { label: "Фаз", value: "5", color: C.blue },
+  { label: "Недель MVP", value: "12", color: C.green },
+  { label: "Django-приложений", value: "6", color: C.cyan },
+  { label: "API-эндпоинтов", value: "22+", color: C.purple },
+  { label: "Моделей данных", value: "14", color: C.amber },
+  { label: "Промптов Jinja2", value: "30+", color: C.rose },
+  { label: "Шагов АРИЗ", value: "~30", color: C.green },
+];
+
+function App() {
+  const [view, setView] = useState("tasks");
+  const [expandedPhase, setExpandedPhase] = useState("phase1");
+  const [expandedSection, setExpandedSection] = useState(null);
+
+  const [taskFilter, setTaskFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const totalTasks = taskList.reduce((s, g) => s + g.tasks.length, 0);
+  const totalHours = taskList.reduce((s, g) => s + g.tasks.reduce((ss, t) => ss + t.hours, 0), 0);
+  const highTasks = taskList.reduce((s, g) => s + g.tasks.filter(t => t.priority === "high").length, 0);
+  const completedTasks = taskList.reduce((s, g) => s + g.tasks.filter(t => (t.status || "pending") === "completed").length, 0);
+  const verifiedTasks = taskList.reduce((s, g) => s + g.tasks.filter(t => (t.status || "pending") === "verified").length, 0);
+  const fixRequiredTasks = taskList.reduce((s, g) => s + g.tasks.filter(t => (t.status || "pending") === "fix_required").length, 0);
+  const inProgressTasks = taskList.reduce((s, g) => s + g.tasks.filter(t => (t.status || "pending") === "in_progress").length, 0);
+
+  const tabs = [
+    { id: "tasks", label: "Task List (" + totalTasks + ")" },
+    { id: "phases", label: "Фазы MVP" },
+    { id: "flow", label: "АРИЗ Flow" },
+    { id: "stack", label: "Tech Stack" },
+    { id: "migrations", label: "Миграции БД" },
+  ];
+
+  return (
+    <div style={{ minHeight: "100vh" }}>
+      {/* Header */}
+      <div style={{ padding: "24px 32px", borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+          <span style={{ fontSize: 28 }}>{"\u26A1"}</span>
+          <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.5px" }}>
+            ТРИЗ-Решатель
+          </h1>
+          <span style={{ fontSize: 11, color: C.dim, background: C.card, padding: "3px 10px", borderRadius: 4, border: `1px solid ${C.border}` }}>
+            Техническое задание v1.0
+          </span>
+        </div>
+        <p style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>
+          AI-платформа решения задач по АРИЗ-2010 (В. Петров) &bull; OpenAI GPT-4o &bull; Django + React &bull; Docker
+        </p>
+
+        {/* Stats bar */}
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
+          {stats.map((s, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 18, fontWeight: 800, color: s.color }}>{s.value}</span>
+              <span style={{ fontSize: 11, color: C.dim }}>{s.label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 4 }}>
+          {tabs.map(tab => (
+            <button key={tab.id} onClick={() => { setView(tab.id); setExpandedSection(null); }}
+              style={{
+                padding: "8px 16px", fontSize: 12, fontWeight: 600, fontFamily: "inherit",
+                background: view === tab.id ? C.blue : "transparent",
+                color: view === tab.id ? "#fff" : C.muted,
+                border: `1px solid ${view === tab.id ? C.blue : C.border}`,
+                borderRadius: 6, cursor: "pointer", transition: "all 0.2s",
+              }}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{ padding: "24px 32px" }}>
+
+        {/* === TASK LIST VIEW === */}
+        {view === "tasks" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+              <div>
+                <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Task List \u2014 детальный план реализации</h2>
+                <p style={{ fontSize: 12, color: C.dim }}>
+                  {totalTasks} задач &bull; ~{totalHours}h &bull;{" "}
+                  <span style={{ color: "#22c55e", fontWeight: 700 }}>{verifiedTasks} проверено</span> &bull;{" "}
+                  <span style={{ color: C.amber, fontWeight: 700 }}>{completedTasks} на ревью</span> &bull;{" "}
+                  {fixRequiredTasks > 0 && <><span style={{ color: C.rose, fontWeight: 700 }}>{fixRequiredTasks} исправить</span>{" "}&bull;{" "}</>}
+                  <span style={{ color: C.cyan, fontWeight: 700 }}>{inProgressTasks} в работе</span> &bull;{" "}
+                  <span>{totalTasks - verifiedTasks - completedTasks - fixRequiredTasks - inProgressTasks} ожидает</span>
+                </p>
+                {(verifiedTasks + completedTasks + inProgressTasks + fixRequiredTasks) > 0 && (
+                  <div style={{ marginTop: 6, height: 4, background: C.border, borderRadius: 2, overflow: "hidden", maxWidth: 400 }}>
+                    <div style={{ display: "flex", height: "100%" }}>
+                      <div style={{ width: (verifiedTasks / totalTasks * 100) + "%", background: "#22c55e" }} />
+                      <div style={{ width: (completedTasks / totalTasks * 100) + "%", background: C.amber }} />
+                      <div style={{ width: (fixRequiredTasks / totalTasks * 100) + "%", background: C.rose }} />
+                      <div style={{ width: (inProgressTasks / totalTasks * 100) + "%", background: C.cyan }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <span style={{ fontSize: 10, color: C.dim, lineHeight: "24px", marginRight: 4 }}>Приоритет:</span>
+                  {[
+                    { id: "all", label: "Все", c: C.blue },
+                    { id: "high", label: "High", c: C.rose },
+                    { id: "medium", label: "Medium", c: C.amber },
+                    { id: "low", label: "Low", c: C.dim },
+                  ].map(f => (
+                    <button key={f.id} onClick={() => setTaskFilter(f.id)}
+                      style={{
+                        padding: "4px 12px", fontSize: 11, fontWeight: 600, fontFamily: "inherit",
+                        background: taskFilter === f.id ? f.c : "transparent",
+                        color: taskFilter === f.id ? "#fff" : C.muted,
+                        border: `1px solid ${taskFilter === f.id ? "transparent" : C.border}`,
+                        borderRadius: 4, cursor: "pointer",
+                      }}>
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <span style={{ fontSize: 10, color: C.dim, lineHeight: "24px", marginRight: 4 }}>Статус:</span>
+                  {[
+                    { id: "all", label: "Все", c: C.blue },
+                    { id: "pending", label: "Ожидает", c: C.dim },
+                    { id: "in_progress", label: "В работе", c: C.cyan },
+                    { id: "completed", label: "На ревью", c: C.amber },
+                    { id: "verified", label: "Проверено", c: "#22c55e" },
+                    { id: "fix_required", label: "Исправить", c: C.rose },
+                  ].map(f => (
+                    <button key={f.id} onClick={() => setStatusFilter(f.id)}
+                      style={{
+                        padding: "4px 12px", fontSize: 11, fontWeight: 600, fontFamily: "inherit",
+                        background: statusFilter === f.id ? f.c : "transparent",
+                        color: statusFilter === f.id ? "#fff" : C.muted,
+                        border: `1px solid ${statusFilter === f.id ? "transparent" : C.border}`,
+                        borderRadius: 4, cursor: "pointer",
+                      }}>
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Summary bar */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+              {taskList.map((group, gi) => {
+                const filtered = group.tasks.filter(t => (taskFilter === "all" || t.priority === taskFilter) && (statusFilter === "all" || (t.status || "pending") === statusFilter));
+                const hrs = group.tasks.reduce((s, t) => s + t.hours, 0);
+                return (
+                  <div key={gi} style={{
+                    flex: `${Math.max(filtered.length, 1)} 1 0`,
+                    background: C.card, border: `1px solid ${C.border}`,
+                    borderTop: `3px solid ${group.color}`, borderRadius: 6, padding: "8px 10px",
+                    textAlign: "center", minWidth: 0,
+                  }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: group.color }}>{filtered.length}</div>
+                    <div style={{ fontSize: 9, color: C.dim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{group.weeks}</div>
+                    <div style={{ fontSize: 9, color: C.muted }}>{hrs}h</div>
+                    {(() => {
+                      const done = group.tasks.filter(t => ["completed","verified"].includes(t.status || "pending")).length;
+                      const pct = Math.round(done / group.tasks.length * 100);
+                      return done > 0 ? (
+                        <div style={{ marginTop: 4, height: 3, background: C.border, borderRadius: 2, overflow: "hidden" }}>
+                          <div style={{ width: pct + "%", height: "100%", background: C.green, borderRadius: 2 }} />
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Task groups */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {taskList.map((group, gi) => {
+                const filtered = group.tasks.filter(t => (taskFilter === "all" || t.priority === taskFilter) && (statusFilter === "all" || (t.status || "pending") === statusFilter));
+                if (filtered.length === 0) return null;
+                const groupHours = group.tasks.reduce((s, t) => s + t.hours, 0);
+                return (
+                  <div key={gi} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
+                    {/* Group header */}
+                    <div style={{
+                      padding: "12px 16px", background: group.color + "12",
+                      borderBottom: `1px solid ${C.border}`,
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ width: 4, height: 20, borderRadius: 2, background: group.color }} />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: group.color }}>{group.phase}</span>
+                        <span style={{ fontSize: 12, color: C.muted }}>{group.subtitle}</span>
+                        {group.sysId && <span style={{ fontSize: 9, color: C.dim, background: C.bg, padding: "1px 6px", borderRadius: 3, border: `1px solid ${C.border}` }}>{"#" + group.sysId.join(", #")}</span>}
+                      </div>
+                      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                        {(() => {
+                          const verified = group.tasks.filter(t => (t.status || "pending") === "verified").length;
+                          const done = group.tasks.filter(t => ["completed","verified"].includes(t.status || "pending")).length;
+                          const fixes = group.tasks.filter(t => (t.status || "pending") === "fix_required").length;
+                          const prog = group.tasks.filter(t => (t.status || "pending") === "in_progress").length;
+                          return (done > 0 || prog > 0 || fixes > 0) ? (
+                            <span style={{ fontSize: 10, fontWeight: 700 }}>
+                              {verified > 0 && <span style={{ color: "#22c55e" }}>{verified}</span>}
+                              {verified > 0 && done > verified && <span style={{ color: C.dim }}>+</span>}
+                              {done > verified && <span style={{ color: C.amber }}>{done - verified}</span>}
+                              <span style={{ color: C.dim }}>/</span>
+                              <span style={{ color: C.muted }}>{group.tasks.length}</span>
+                              {fixes > 0 && <span style={{ color: C.rose, marginLeft: 4 }}>({fixes} fix)</span>}
+                              {prog > 0 && <span style={{ color: C.cyan, marginLeft: 4 }}>({prog} wip)</span>}
+                            </span>
+                          ) : null;
+                        })()}
+                        <span style={{ fontSize: 11, color: C.dim }}>{filtered.length} задач</span>
+                        <span style={{ fontSize: 11, color: group.color, fontWeight: 700 }}>{groupHours}h</span>
+                      </div>
+                    </div>
+                    {/* Tasks */}
+                    {filtered.map((task, ti) => {
+                      const prColor = task.priority === "high" ? C.rose : task.priority === "medium" ? C.amber : C.dim;
+                      const st = task.status || "pending";
+                      const stColor = st === "verified" ? "#22c55e" : st === "fix_required" ? C.rose : st === "completed" ? C.amber : st === "in_progress" ? C.cyan : C.dim;
+                      const stLabel = st === "verified" ? "\u2713 OK" : st === "fix_required" ? "\u26A0 FIX" : st === "completed" ? "ON REVIEW" : st === "in_progress" ? "IN PROGRESS" : "PENDING";
+                      return (
+                        <React.Fragment key={ti}>
+                          <div style={{
+                            display: "grid", gridTemplateColumns: "44px 1fr 130px 78px 120px 52px 36px",
+                            padding: "9px 16px", gap: 6, alignItems: "center",
+                            borderBottom: (ti < filtered.length - 1 && !(task.reviewNote && st === "fix_required")) ? `1px solid ${C.border}` : "none",
+                            background: st === "verified" ? "#22c55e08" : st === "fix_required" ? C.rose + "0a" : st === "completed" ? C.amber + "06" : st === "in_progress" ? C.cyan + "08" : "transparent",
+                          }}>
+                            <code style={{ fontSize: 11, fontWeight: 700, color: group.color }}>{task.id}</code>
+                            <span style={{ fontSize: 11, color: st === "verified" ? C.dim : C.text, textDecoration: st === "verified" ? "line-through" : "none" }}>{task.title}</span>
+                            <code style={{ fontSize: 10, color: C.dim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.file}</code>
+                            <span title={task.reviewNote || ""} style={{
+                              fontSize: 8, fontWeight: 700, color: stColor, background: stColor + "20",
+                              padding: "2px 6px", borderRadius: 3, textAlign: "center", letterSpacing: "0.5px",
+                              cursor: task.reviewNote ? "help" : "default",
+                            }}>{stLabel}</span>
+                            <div style={{ overflow: "hidden" }}>
+                              <span style={{ fontSize: 10, color: task.owner ? C.blueLight : C.dim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block" }}>{task.owner || "\u2014"}</span>
+                              {task.reviewer && <span style={{ fontSize: 9, color: C.purple, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block" }}>{"\u2192 " + task.reviewer}</span>}
+                            </div>
+                            <span style={{
+                              fontSize: 9, fontWeight: 700, color: prColor, background: prColor + "20",
+                              padding: "2px 6px", borderRadius: 3, textAlign: "center", textTransform: "uppercase",
+                            }}>{task.priority}</span>
+                            <span style={{ fontSize: 11, color: C.muted, textAlign: "right" }}>{task.hours}h</span>
+                          </div>
+                          {task.reviewNote && st === "fix_required" && (
+                            <div style={{
+                              padding: "4px 16px 8px 60px", fontSize: 10, color: C.rose,
+                              background: C.rose + "08",
+                              borderBottom: ti < filtered.length - 1 ? `1px solid ${C.border}` : "none",
+                            }}>{"\u26A0 "}{task.reviewNote}</div>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* === PHASES VIEW === */}
+        {view === "phases" && (
+          <div style={{ display: "flex", gap: 24 }}>
+            {/* Timeline */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+              {phases.map((phase, pi) => (
+                <div key={phase.id}>
+                  {/* Phase header */}
+                  <div onClick={() => setExpandedPhase(expandedPhase === phase.id ? null : phase.id)}
+                    style={{
+                      padding: "14px 18px", cursor: "pointer", transition: "all 0.2s",
+                      background: expandedPhase === phase.id ? C.card : "transparent",
+                      border: `1px solid ${expandedPhase === phase.id ? phase.color : C.border}`,
+                      borderRadius: expandedPhase === phase.id ? "10px 10px 0 0" : 10,
+                      borderLeft: `4px solid ${phase.color}`,
+                    }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: phase.color }}>{phase.title}</span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{phase.subtitle}</span>
+                      </div>
+                      <span style={{
+                        fontSize: 11, color: phase.color, background: phase.color + "20",
+                        padding: "2px 10px", borderRadius: 12, fontWeight: 600,
+                      }}>{phase.weeks}</span>
+                    </div>
+                  </div>
+
+                  {/* Phase sections */}
+                  {expandedPhase === phase.id && (
+                    <div style={{
+                      border: `1px solid ${phase.color}`, borderTop: "none",
+                      borderRadius: "0 0 10px 10px", background: C.card, padding: 12,
+                      display: "flex", flexDirection: "column", gap: 8,
+                    }}>
+                      {phase.sections.map((sec, si) => (
+                        <div key={si}>
+                          <div onClick={(e) => { e.stopPropagation(); setExpandedSection(expandedSection === `${phase.id}-${si}` ? null : `${phase.id}-${si}`); }}
+                            style={{
+                              padding: "10px 14px", cursor: "pointer",
+                              background: expandedSection === `${phase.id}-${si}` ? C.bg : "transparent",
+                              border: `1px solid ${expandedSection === `${phase.id}-${si}` ? phase.color + "60" : C.border}`,
+                              borderRadius: expandedSection === `${phase.id}-${si}` ? "8px 8px 0 0" : 8,
+                              display: "flex", justifyContent: "space-between", alignItems: "center",
+                            }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontSize: 16 }}>{sec.icon}</span>
+                              <span style={{ fontSize: 12, fontWeight: 600 }}>{sec.title}</span>
+                            </div>
+                            <span style={{ fontSize: 10, color: C.dim }}>{sec.items.length} элементов</span>
+                          </div>
+
+                          {expandedSection === `${phase.id}-${si}` && (
+                            <div style={{
+                              border: `1px solid ${phase.color}40`, borderTop: "none",
+                              borderRadius: "0 0 8px 8px", background: C.bg, padding: 8,
+                            }}>
+                              {sec.items.map((item, ii) => (
+                                <div key={ii} style={{
+                                  padding: "8px 12px",
+                                  borderBottom: ii < sec.items.length - 1 ? `1px solid ${C.border}` : "none",
+                                  display: "flex", gap: 12, alignItems: "baseline",
+                                }}>
+                                  <code style={{ fontSize: 11, fontWeight: 700, color: phase.color, whiteSpace: "nowrap", minWidth: 0, flexShrink: 0 }}>
+                                    {item.name}
+                                  </code>
+                                  <span style={{ fontSize: 11, color: C.muted }}>{item.desc}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Connector */}
+                  {pi < phases.length - 1 && (
+                    <div style={{ display: "flex", justifyContent: "center", padding: "2px 0" }}>
+                      <div style={{ width: 2, height: 8, background: C.border }} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Sidebar — orchestration pattern */}
+            <div style={{ width: 340, flexShrink: 0 }}>
+              <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20, position: "sticky", top: 24 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.dim, letterSpacing: "1px", marginBottom: 14 }}>
+                  ПАТТЕРН ОРКЕСТРАЦИИ ШАГА
+                </div>
+                {[
+                  { icon: "\u{1F4E9}", text: "POST /submit \u2192 StepResult(IN_PROGRESS)", color: C.blue },
+                  { icon: "\u{2699}\u{FE0F}", text: "Celery: execute_ariz_step.delay()", color: C.amber },
+                  { icon: "\u{1F4CB}", text: "Загрузить context_snapshot", color: C.muted },
+                  { icon: "\u{1F4DD}", text: "PromptManager.render(system + step)", color: C.cyan },
+                  { icon: "\u{1F9E0}", text: "OpenAI GPT-4o \u2192 response", color: C.purple },
+                  { icon: "\u{2705}", text: "Validator.validate(rules)", color: C.green },
+                  { icon: "\u{1F4BE}", text: "Save StepResult + update snapshot", color: C.rose },
+                  { icon: "\u{1F504}", text: "Frontend polling (1-3s backoff)", color: C.blue },
+                ].map((s, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: i < 7 ? `1px solid ${C.border}` : "none" }}>
+                    <span style={{ fontSize: 14, width: 24, textAlign: "center" }}>{s.icon}</span>
+                    <span style={{ fontSize: 11, color: s.color }}>{s.text}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Three modes */}
+              <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20, marginTop: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.dim, letterSpacing: "1px", marginBottom: 14 }}>
+                  ТРИ РЕЖИМА АРИЗ
+                </div>
+                {[
+                  { name: "Экспресс (B2C)", steps: "7 шагов", time: "5-10 мин", color: C.green },
+                  { name: "Полный АРИЗ (B2B)", steps: "~30 шагов", time: "30-60 мин", color: C.purple },
+                  { name: "Автопилот", steps: "Авто", time: "1-3 мин", color: C.amber },
+                ].map((m, i) => (
+                  <div key={i} style={{ padding: "8px 0", borderBottom: i < 2 ? `1px solid ${C.border}` : "none", display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: m.color }}>{m.name}</span>
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: 11, color: C.muted }}>{m.steps}</span>
+                      <span style={{ fontSize: 11, color: C.dim, marginLeft: 8 }}>{m.time}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* === ARIZ FLOW VIEW === */}
+        {view === "flow" && (
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Экспресс-АРИЗ: 7 шагов</h2>
+            <p style={{ fontSize: 12, color: C.dim, marginBottom: 24 }}>
+              Цепочка: Задача \u2192 ПП \u2192 УП \u2192 ИКР \u2192 ОП \u2192 Решение. Каждый шаг = вызов OpenAI GPT-4o + валидация.
+            </p>
+
+            <div style={{ display: "flex", gap: 32 }}>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 0 }}>
+                {arizFlow.map((s, i) => (
+                  <div key={i}>
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 16,
+                      padding: "16px 20px", background: C.card,
+                      border: `1px solid ${C.border}`, borderRadius: 8,
+                    }}>
+                      <div style={{
+                        width: 40, height: 40, borderRadius: "50%",
+                        background: s.color + "20", border: `2px solid ${s.color}`,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 16, fontWeight: 800, color: s.color, flexShrink: 0,
+                      }}>{s.step}</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: s.color }}>{s.name}</div>
+                        <div style={{ fontSize: 11, color: C.muted }}>{s.desc}</div>
+                      </div>
+                      <code style={{ fontSize: 10, color: C.dim, background: C.bg, padding: "2px 8px", borderRadius: 4 }}>
+                        {s.action}
+                      </code>
+                    </div>
+                    {i < arizFlow.length - 1 && (
+                      <div style={{ display: "flex", alignItems: "center", paddingLeft: 39 }}>
+                        <div style={{ width: 2, height: 16, background: C.border }} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Full ARIZ sidebar */}
+              <div style={{ width: 340, flexShrink: 0 }}>
+                <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: C.dim, letterSpacing: "1px", marginBottom: 14 }}>
+                    ПОЛНЫЙ АРИЗ-2010 (B2B)
+                  </div>
+                  {[
+                    { part: "Часть 1", name: "Анализ задачи", steps: "1.1\u20131.7", rules: "16 правил", color: C.cyan },
+                    { part: "Часть 2", name: "Анализ ресурсов", steps: "2.1\u20132.3", rules: "ОЗ, ОВ, ВПР", color: C.green },
+                    { part: "Часть 3", name: "Определение ОП", steps: "3.1\u20133.6", rules: "ИКР, углубление", color: C.purple },
+                    { part: "Часть 4", name: "Получение решения", steps: "4.1\u20134.8", rules: "8 инструментов", color: C.rose },
+                  ].map((p, i) => (
+                    <div key={i} style={{
+                      padding: "10px 0",
+                      borderBottom: i < 3 ? `1px solid ${C.border}` : "none",
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: p.color }}>{p.part}: {p.name}</span>
+                        <span style={{ fontSize: 10, color: C.dim }}>{p.steps}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: C.muted }}>{p.rules}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 20, marginTop: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: C.dim, letterSpacing: "1px", marginBottom: 14 }}>
+                    ИЕРАРХИЯ ПРОМПТОВ
+                  </div>
+                  {[
+                    { level: 0, name: "System Prompt (Master)", color: C.rose },
+                    { level: 1, name: "Role Prompt", color: C.amber },
+                    { level: 1, name: "Methodology Prompt", color: C.amber },
+                    { level: 2, name: "Step Prompt (шаг X)", color: C.green },
+                    { level: 2, name: "Validation Prompt", color: C.green },
+                    { level: 2, name: "Knowledge Base Data", color: C.green },
+                    { level: 1, name: "Audience Adapter (B2C/B2B)", color: C.cyan },
+                  ].map((p, i) => (
+                    <div key={i} style={{
+                      paddingLeft: p.level * 16, padding: `4px 0 4px ${p.level * 16}px`,
+                      display: "flex", alignItems: "center", gap: 6,
+                    }}>
+                      <div style={{ width: 6, height: 6, borderRadius: 3, background: p.color, flexShrink: 0 }} />
+                      <span style={{ fontSize: 11, color: p.color }}>{p.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* === TECH STACK VIEW === */}
+        {view === "stack" && (
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Технологический стек</h2>
+            <p style={{ fontSize: 12, color: C.dim, marginBottom: 24 }}>
+              Django + DRF, React + TS, OpenAI GPT-4o, PostgreSQL + pgvector, Docker Compose
+            </p>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+              {techStack.map((cat, ci) => (
+                <div key={ci} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
+                  <div style={{
+                    padding: "12px 16px", background: cat.color + "15",
+                    borderBottom: `1px solid ${C.border}`,
+                    fontSize: 13, fontWeight: 700, color: cat.color,
+                  }}>{cat.cat}</div>
+                  {cat.items.map((item, ii) => (
+                    <div key={ii} style={{
+                      padding: "12px 16px",
+                      borderBottom: ii < cat.items.length - 1 ? `1px solid ${C.border}` : "none",
+                    }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>{item.name}</div>
+                      <div style={{ fontSize: 11, color: C.dim }}>{item.desc}</div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+
+            {/* Timeline */}
+            <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 32, marginBottom: 16 }}>MVP Roadmap (12 недель)</h3>
+            <div style={{ display: "flex", gap: 8 }}>
+              {phases.map((p, i) => (
+                <div key={i} style={{
+                  flex: `${p.weeks === "2-3 дня" ? 1 : parseInt(p.weeks)} 1 0`,
+                  background: C.card, border: `1px solid ${C.border}`,
+                  borderTop: `3px solid ${p.color}`, borderRadius: 8, padding: 14,
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: p.color }}>{p.title}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{p.subtitle}</div>
+                  <div style={{ fontSize: 10, color: C.dim }}>{p.weeks}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* === MIGRATIONS VIEW === */}
+        {view === "migrations" && (
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Миграции базы данных</h2>
+            <p style={{ fontSize: 12, color: C.dim, marginBottom: 24 }}>
+              Порядок выполнения makemigrations / migrate по фазам
+            </p>
+
+            <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
+              {/* Header */}
+              <div style={{ display: "grid", gridTemplateColumns: "50px 1fr 100px 1fr 80px", padding: "10px 16px", background: C.bg, borderBottom: `1px solid ${C.border}` }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: C.dim }}>#</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: C.dim }}>Приложение</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: C.dim }}>Миграция</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: C.dim }}>Содержимое</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: C.dim }}>Фаза</span>
+              </div>
+              {dbMigrations.map((m, i) => {
+                const phaseColor = m.phase === 1 ? C.green : m.phase === 3 ? C.amber : C.purple;
+                return (
+                  <div key={i} style={{
+                    display: "grid", gridTemplateColumns: "50px 1fr 100px 1fr 80px",
+                    padding: "10px 16px",
+                    borderBottom: i < dbMigrations.length - 1 ? `1px solid ${C.border}` : "none",
+                  }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: C.dim }}>{m.order}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{m.app}</span>
+                    <code style={{ fontSize: 11, color: phaseColor }}>{m.migration}</code>
+                    <span style={{ fontSize: 11, color: C.muted }}>{m.desc}</span>
+                    <span style={{ fontSize: 10, color: phaseColor, background: phaseColor + "20", padding: "2px 8px", borderRadius: 10, textAlign: "center", fontWeight: 600 }}>
+                      Фаза {m.phase}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Testing strategy */}
+            <h3 style={{ fontSize: 14, fontWeight: 700, marginTop: 32, marginBottom: 16 }}>Стратегия тестирования</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+              {[
+                { phase: "Фаза 1 — Unit", color: C.green, tests: [
+                  "test_models.py — модели, связи",
+                  "test_engine.py — ARIZEngine (мок Celery)",
+                  "test_prompts.py — рендеринг промптов",
+                  "test_llm_client.py — OpenAIClient (мок API)",
+                  "test_validators.py — rule-based валидаторы",
+                  "test_api.py — все эндпоинты (DRF APIClient)",
+                ]},
+                { phase: "Фаза 2 — Frontend", color: C.cyan, tests: [
+                  "ChatInterface.test.tsx",
+                  "StepProgress.test.tsx",
+                  "SolutionCard.test.tsx",
+                  "useStepPolling.test.ts — polling логика",
+                ]},
+                { phase: "Фаза 3 — Integration", color: C.amber, tests: [
+                  "test_vector_search.py — pgvector",
+                  "test_load_triz_data.py — загрузка данных",
+                  "test_knowledge_api.py — API поиска",
+                ]},
+                { phase: "Фаза 4 — E2E", color: C.purple, tests: [
+                  "test_full_express_flow.py — полный цикл 7 шагов",
+                  "test_report_generation.py — PDF + DOCX",
+                  "test_plan_limits.py — лимиты тарифов",
+                ]},
+              ].map((g, gi) => (
+                <div key={gi} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
+                  <div style={{ padding: "10px 16px", background: g.color + "15", borderBottom: `1px solid ${C.border}`, fontSize: 12, fontWeight: 700, color: g.color }}>
+                    {g.phase}
+                  </div>
+                  {g.tests.map((t, ti) => (
+                    <div key={ti} style={{ padding: "8px 16px", borderBottom: ti < g.tests.length - 1 ? `1px solid ${C.border}` : "none" }}>
+                      <code style={{ fontSize: 11, color: C.muted }}>{t}</code>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div style={{ padding: "16px 32px", borderTop: `1px solid ${C.border}`, textAlign: "center" }}>
+        <span style={{ fontSize: 11, color: C.dim }}>
+          ТРИЗ-Решатель &bull; Full MVP &bull; 12 недель &bull; Django + React + OpenAI GPT-4o &bull; Docker Compose
+        </span>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
