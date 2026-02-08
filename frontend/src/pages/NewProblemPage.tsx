@@ -8,16 +8,25 @@ const MODES = [
     value: "express",
     label: "Экспресс",
     description: "7 шагов — быстрый анализ для простых задач",
+    badge: "5-10 мин",
+    color: "border-green-500 bg-green-50 dark:bg-green-900/20",
+    activeRing: "ring-green-500/40",
   },
   {
     value: "full",
     label: "Полный АРИЗ-2010",
     description: "24 шага — глубокий анализ по методологии В. Петрова",
+    badge: "30-60 мин",
+    color: "border-purple-500 bg-purple-50 dark:bg-purple-900/20",
+    activeRing: "ring-purple-500/40",
   },
   {
     value: "autopilot",
     label: "Автопилот",
     description: "ИИ проходит все шаги самостоятельно",
+    badge: "1-3 мин",
+    color: "border-amber-500 bg-amber-50 dark:bg-amber-900/20",
+    activeRing: "ring-amber-500/40",
   },
 ] as const;
 
@@ -59,13 +68,13 @@ export default function NewProblemPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-2xl mx-auto animate-fade-in">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
         Новая задача
       </h1>
 
       {error && (
-        <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm">
+        <div className="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg mb-4 text-sm">
           {error}
         </div>
       )}
@@ -80,7 +89,7 @@ export default function NewProblemPage() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Например: Перегрев трубы при работе компрессора"
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            className="input-field"
             required
           />
         </div>
@@ -94,7 +103,7 @@ export default function NewProblemPage() {
             onChange={(e) => setDescription(e.target.value)}
             rows={5}
             placeholder="Опишите проблему подробно: что происходит, какие ограничения, что уже пробовали..."
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            className="input-field resize-y"
             required
           />
         </div>
@@ -109,14 +118,19 @@ export default function NewProblemPage() {
                 key={m.value}
                 type="button"
                 onClick={() => setMode(m.value)}
-                className={`p-4 rounded-lg border text-left transition-colors ${
+                className={`p-4 rounded-lg border text-left transition-all ${
                   mode === m.value
-                    ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20"
-                    : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
+                    ? `${m.color} ring-2 ${m.activeRing}`
+                    : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
                 }`}
               >
-                <div className="font-medium text-gray-900 dark:text-white text-sm">
-                  {m.label}
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-medium text-gray-900 dark:text-white text-sm">
+                    {m.label}
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                    {m.badge}
+                  </span>
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   {m.description}
@@ -133,7 +147,7 @@ export default function NewProblemPage() {
           <select
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            className="input-field"
           >
             {DOMAINS.map((d) => (
               <option key={d.value} value={d.value}>
@@ -146,7 +160,7 @@ export default function NewProblemPage() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full bg-primary-600 text-white py-3 rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50"
+          className="w-full btn-primary py-3 text-base"
         >
           {isSubmitting ? "Создаём..." : "Начать анализ"}
         </button>

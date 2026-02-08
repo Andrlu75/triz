@@ -21,14 +21,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center">
-      <div className="bg-white dark:bg-gray-900 p-8 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 w-full max-w-md">
+    <div className="min-h-[70vh] flex items-center justify-center animate-fade-in">
+      <div className="card p-8 w-full max-w-md">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
           Вход
         </h1>
 
         {error && (
-          <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm">
+          <div className="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg mb-4 text-sm">
             {error}
           </div>
         )}
@@ -42,7 +42,8 @@ export default function LoginPage() {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              className="input-field"
+              autoComplete="username"
               required
             />
           </div>
@@ -55,7 +56,8 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              className="input-field"
+              autoComplete="current-password"
               required
             />
           </div>
@@ -63,7 +65,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-primary-600 text-white py-2 rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50"
+            className="w-full btn-primary py-2.5"
           >
             {isLoading ? "Входим..." : "Войти"}
           </button>
