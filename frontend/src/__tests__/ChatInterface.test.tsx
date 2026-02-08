@@ -35,6 +35,7 @@ describe("ChatInterface", () => {
         currentStep={pendingStep}
         isPolling={false}
         isSubmitting={false}
+        isCompleted={false}
         onSubmit={vi.fn()}
       />,
     );
@@ -50,6 +51,7 @@ describe("ChatInterface", () => {
         currentStep={pendingStep}
         isPolling={true}
         isSubmitting={false}
+        isCompleted={false}
         onSubmit={vi.fn()}
       />,
     );
@@ -64,6 +66,7 @@ describe("ChatInterface", () => {
         currentStep={pendingStep}
         isPolling={true}
         isSubmitting={false}
+        isCompleted={false}
         onSubmit={vi.fn()}
       />,
     );
@@ -80,16 +83,48 @@ describe("ChatInterface", () => {
         currentStep={pendingStep}
         isPolling={false}
         isSubmitting={false}
+        isCompleted={false}
         onSubmit={onSubmit}
       />,
     );
 
     const textarea = screen.getByRole("textbox");
-    const button = screen.getByText("Отправить");
+    const submitButton = screen.getByLabelText("Отправить");
 
     fireEvent.change(textarea, { target: { value: "My input" } });
-    fireEvent.click(button);
+    fireEvent.click(submitButton);
 
     expect(onSubmit).toHaveBeenCalledWith("My input");
+  });
+
+  it("hides input area when session is completed", () => {
+    render(
+      <ChatInterface
+        steps={[completedStep]}
+        currentStep={null}
+        isPolling={false}
+        isSubmitting={false}
+        isCompleted={true}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText("Анализ завершён")).toBeDefined();
+  });
+
+  it("shows welcome message when no completed steps yet", () => {
+    render(
+      <ChatInterface
+        steps={[]}
+        currentStep={pendingStep}
+        isPolling={false}
+        isSubmitting={false}
+        isCompleted={false}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("ТРИЗ-эксперт готов к работе")).toBeDefined();
   });
 });
