@@ -1,0 +1,156 @@
+import { FormEvent, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { createProblem } from "@/api/problems";
+import { startSession } from "@/api/sessions";
+
+const MODES = [
+  {
+    value: "express",
+    label: "Экспресс",
+    description: "7 шагов — быстрый анализ для простых задач",
+  },
+  {
+    value: "full",
+    label: "Полный АРИЗ-2010",
+    description: "24 шага — глубокий анализ по методологии В. Петрова",
+  },
+  {
+    value: "autopilot",
+    label: "Автопилот",
+    description: "ИИ проходит все шаги самостоятельно",
+  },
+] as const;
+
+const DOMAINS = [
+  { value: "technical", label: "Техническая" },
+  { value: "business", label: "Бизнес" },
+  { value: "everyday", label: "Бытовая" },
+] as const;
+
+export default function NewProblemPage() {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [mode, setMode] = useState<string>("express");
+  const [domain, setDomain] = useState<string>("technical");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      const problem = await createProblem({
+        title,
+        original_description: description,
+        mode,
+        domain,
+      });
+
+      const session = await startSession(problem.id, mode);
+      navigate(`/sessions/${session.id}`);
+    } catch {
+      setError("Не удалось создать задачу. Попробуйте ещё раз.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
+        Новая задача
+      </h1>
+
+      {error && (
+        <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm">
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Название задачи
+          </label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Например: Перегрев трубы при работе компрессора"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Описание проблемы
+          </label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={5}
+            placeholder="Опишите проблему подробно: что происходит, какие ограничения, что уже пробовали..."
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            Режим анализа
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setMode(m.value)}
+                className={`p-4 rounded-lg border text-left transition-colors ${
+                  mode === m.value
+                    ? "border-primary-500 bg-primary-50 dark:bg-primary-900/20"
+                    : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
+                }`}
+              >
+                <div className="font-medium text-gray-900 dark:text-white text-sm">
+                  {m.label}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  {m.description}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Область
+          </label>
+          <select
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+          >
+            {DOMAINS.map((d) => (
+              <option key={d.value} value={d.value}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="w-full bg-primary-600 text-white py-3 rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50"
+        >
+          {isSubmitting ? "Создаём..." : "Начать анализ"}
+        </button>
+      </form>
+    </div>
+  );
+}
