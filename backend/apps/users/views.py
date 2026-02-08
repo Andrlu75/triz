@@ -1,8 +1,20 @@
-from rest_framework import generics, permissions, status
+from django.contrib.auth import get_user_model
+from django.shortcuts import get_object_or_404
+from rest_framework import generics, permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from apps.users.serializers import RegisterSerializer, UserSerializer
+from apps.problems.models import ProblemShare
+from apps.users.models import Organization, OrganizationMembership
+from apps.users.serializers import (
+    OrganizationMembershipSerializer,
+    OrganizationSerializer,
+    RegisterSerializer,
+    UserSerializer,
+)
+
+User = get_user_model()
 
 
 class RegisterView(generics.CreateAPIView):
@@ -28,3 +40,75 @@ class MeView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
+
+
+class OrganizationViewSet(viewsets.ModelViewSet):
+    """CRUD for organizations. Only business-plan users can create."""
+
+    serializer_class = OrganizationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Organization.objects.filter(
+            memberships__user=self.request.user
+        ).distinct()
+
+    def perform_create(self, serializer):
+        org = serializer.save()
+        OrganizationMembership.objects.create(
+            user=self.request.user, organization=org, role="admin"
+        )
+        self.request.user.organization = org
+        self.request.user.save(update_fields=["organization"])
+
+    @action(detail=True, methods=["get", "post"], url_path="members")
+    def members(self, request, pk=None):
+        org = self.get_object()
+
+        if request.method == "GET":
+            memberships = OrganizationMembership.objects.filter(
+                organization=org
+            ).select_related("user")
+            serializer = OrganizationMembershipSerializer(memberships, many=True)
+            return Response(serializer.data)
+
+        # POST — add member
+        username = request.data.get("username")
+        role = request.data.get("role", "member")
+        user = get_object_or_404(User, username=username)
+
+        membership, created = OrganizationMembership.objects.get_or_create(
+            user=user, organization=org, defaults={"role": role}
+        )
+        if not created:
+            return Response(
+                {"detail": "Пользователь уже в организации."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.organization = org
+        user.save(update_fields=["organization"])
+
+        return Response(
+            OrganizationMembershipSerializer(membership).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=True,
+        methods=["delete"],
+        url_path="members/(?P<user_id>[0-9]+)",
+    )
+    def remove_member(self, request, pk=None, user_id=None):
+        org = self.get_object()
+        membership = get_object_or_404(
+            OrganizationMembership, organization=org, user_id=user_id
+        )
+        target_user = membership.user
+        membership.delete()
+
+        if target_user.organization_id == org.id:
+            target_user.organization = None
+            target_user.save(update_fields=["organization"])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)

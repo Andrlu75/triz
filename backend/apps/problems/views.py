@@ -1,18 +1,31 @@
-from rest_framework import viewsets
+from django.contrib.auth import get_user_model
+from django.db.models import Q
+from django.shortcuts import get_object_or_404
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
-from apps.problems.models import Problem
-from apps.problems.serializers import ProblemListSerializer, ProblemSerializer
+from apps.problems.models import Problem, ProblemShare
+from apps.problems.serializers import (
+    ProblemListSerializer,
+    ProblemSerializer,
+    ProblemShareSerializer,
+)
+
+User = get_user_model()
 
 
 class ProblemViewSet(viewsets.ModelViewSet):
     """
     CRUD ViewSet for Problems.
 
-    GET    /api/v1/problems/          — list user's problems
-    POST   /api/v1/problems/          — create a new problem
-    GET    /api/v1/problems/{id}/     — detail
-    PATCH  /api/v1/problems/{id}/     — partial update
-    DELETE /api/v1/problems/{id}/     — delete
+    GET    /api/v1/problems/              — list user's problems (owned + shared)
+    POST   /api/v1/problems/              — create a new problem
+    GET    /api/v1/problems/{id}/         — detail
+    PATCH  /api/v1/problems/{id}/         — partial update
+    DELETE /api/v1/problems/{id}/         — delete
+    POST   /api/v1/problems/{id}/share/   — share problem with another user
+    GET    /api/v1/problems/{id}/shares/  — list shares for a problem
     """
 
     def get_serializer_class(self):
@@ -21,4 +34,46 @@ class ProblemViewSet(viewsets.ModelViewSet):
         return ProblemSerializer
 
     def get_queryset(self):
-        return Problem.objects.filter(user=self.request.user)
+        user = self.request.user
+        # Include owned problems + problems shared with this user
+        return Problem.objects.filter(
+            Q(user=user) | Q(shares__shared_with=user)
+        ).distinct()
+
+    @action(detail=True, methods=["post"], url_path="share")
+    def share(self, request, pk=None):
+        """Share a problem with another user."""
+        problem = get_object_or_404(Problem, pk=pk, user=request.user)
+        username = request.data.get("username")
+        permission = request.data.get("permission", "view")
+
+        target_user = get_object_or_404(User, username=username)
+
+        if target_user == request.user:
+            return Response(
+                {"detail": "Нельзя поделиться задачей с самим собой."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        share, created = ProblemShare.objects.get_or_create(
+            problem=problem,
+            shared_with=target_user,
+            defaults={"permission": permission},
+        )
+        if not created:
+            share.permission = permission
+            share.save(update_fields=["permission"])
+
+        return Response(
+            ProblemShareSerializer(share).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["get"], url_path="shares")
+    def shares(self, request, pk=None):
+        """List all shares for a problem."""
+        problem = get_object_or_404(Problem, pk=pk, user=request.user)
+        shares = ProblemShare.objects.filter(problem=problem).select_related(
+            "shared_with"
+        )
+        return Response(ProblemShareSerializer(shares, many=True).data)

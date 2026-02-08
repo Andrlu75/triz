@@ -1,6 +1,8 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
+from apps.users.models import OrganizationMembership, Organization
+
 User = get_user_model()
 
 
@@ -21,3 +23,20 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         return User.objects.create_user(**validated_data)
+
+
+class OrganizationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Organization
+        fields = ["id", "name", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+
+class OrganizationMembershipSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    username = serializers.CharField(write_only=True, required=False)
+
+    class Meta:
+        model = OrganizationMembership
+        fields = ["id", "user", "username", "organization", "role", "joined_at"]
+        read_only_fields = ["id", "joined_at"]

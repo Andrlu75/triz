@@ -10,6 +10,7 @@ import DashboardPage from "@/pages/DashboardPage";
 import NewProblemPage from "@/pages/NewProblemPage";
 import SessionPage from "@/pages/SessionPage";
 import SummaryPage from "@/pages/SummaryPage";
+import PricingPage from "@/pages/PricingPage";
 
 export default function App() {
   const { init } = useAuthStore();
@@ -23,6 +24,7 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<HomePage />} />
+          <Route path="/pricing" element={<PricingPage />} />
 
           <Route
             path="/login"

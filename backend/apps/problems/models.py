@@ -41,3 +41,33 @@ class Problem(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class ProblemShare(models.Model):
+    PERMISSION_CHOICES = [
+        ("view", "View"),
+        ("comment", "Comment"),
+        ("edit", "Edit"),
+    ]
+
+    problem = models.ForeignKey(
+        Problem,
+        on_delete=models.CASCADE,
+        related_name="shares",
+    )
+    shared_with = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="shared_problems",
+    )
+    permission = models.CharField(
+        max_length=10, choices=PERMISSION_CHOICES, default="view"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("problem", "shared_with")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.problem.title} → {self.shared_with.username} ({self.permission})"
