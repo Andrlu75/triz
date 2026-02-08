@@ -26,7 +26,7 @@ export default function SolutionList({ solutions }: SolutionListProps) {
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
         <span className="text-sm text-gray-500 dark:text-gray-400">
           Сортировка:
         </span>
@@ -52,7 +52,7 @@ export default function SolutionList({ solutions }: SolutionListProps) {
         </button>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4">
         {sorted.map((solution) => (
           <SolutionCard key={solution.id} solution={solution} />
         ))}

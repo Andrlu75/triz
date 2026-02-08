@@ -92,10 +92,10 @@ export default function SummaryPage() {
   const completedSteps = summary.steps.filter((s) => s.status === "completed");
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-0 space-y-6 sm:space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
           Итоги анализа
         </h1>
         <p className="text-gray-500 dark:text-gray-400 mt-1">
@@ -194,20 +194,20 @@ export default function SummaryPage() {
             {error}
           </div>
         )}
-        <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row gap-3">
           <button
             onClick={() => handleDownload("pdf")}
             disabled={downloading !== null}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition-colors"
           >
-            {downloading === "pdf" ? "Генерируем..." : "PDF"}
+            {downloading === "pdf" ? "Генерируем..." : "Скачать PDF"}
           </button>
           <button
             onClick={() => handleDownload("docx")}
             disabled={downloading !== null}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
-            {downloading === "docx" ? "Генерируем..." : "DOCX"}
+            {downloading === "docx" ? "Генерируем..." : "Скачать DOCX"}
           </button>
         </div>
       </section>

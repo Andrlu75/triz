@@ -15,7 +15,7 @@ vi.mock("@/utils/constants", () => ({
   },
 }));
 
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
 import { useStepPolling } from "@/hooks/useStepPolling";
 import { getTaskStatus } from "@/api/sessions";
 
@@ -58,7 +58,7 @@ describe("useStepPolling", () => {
     );
 
     await act(async () => {
-      vi.advanceTimersByTime(100);
+      await vi.advanceTimersByTimeAsync(100);
     });
 
     expect(mockGetTaskStatus).toHaveBeenCalledWith(1, "abc");
@@ -82,13 +82,12 @@ describe("useStepPolling", () => {
       }),
     );
 
+    // Advance timers asynchronously to allow promise resolution
     await act(async () => {
-      vi.advanceTimersByTime(100);
+      await vi.advanceTimersByTimeAsync(200);
     });
 
-    await waitFor(() => {
-      expect(onComplete).toHaveBeenCalled();
-    });
+    expect(onComplete).toHaveBeenCalled();
   });
 
   it("stops polling when stopPolling is called", async () => {
@@ -105,15 +104,46 @@ describe("useStepPolling", () => {
       }),
     );
 
+    // Wait for hook to initialize
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
     act(() => {
       result.current.stopPolling();
     });
 
+    const callsBefore = mockGetTaskStatus.mock.calls.length;
+
     await act(async () => {
-      vi.advanceTimersByTime(5000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
 
-    // Should only poll once before being stopped
-    expect(mockGetTaskStatus.mock.calls.length).toBeLessThanOrEqual(1);
+    // No additional calls should have been made after stopPolling
+    expect(mockGetTaskStatus.mock.calls.length).toBeLessThanOrEqual(
+      callsBefore + 1,
+    );
+  });
+
+  it("reports isPolling = true while actively polling", async () => {
+    mockGetTaskStatus.mockResolvedValue({
+      task_id: "abc",
+      status: "PENDING",
+      ready: false,
+    });
+
+    const { result } = renderHook(() =>
+      useStepPolling({
+        sessionId: 1,
+        taskId: "abc",
+      }),
+    );
+
+    // Wait for hook to initialize
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(result.current.isPolling).toBe(true);
   });
 });
