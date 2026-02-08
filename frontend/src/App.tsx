@@ -9,6 +9,7 @@ import RegisterPage from "@/pages/RegisterPage";
 import DashboardPage from "@/pages/DashboardPage";
 import NewProblemPage from "@/pages/NewProblemPage";
 import SessionPage from "@/pages/SessionPage";
+import SummaryPage from "@/pages/SummaryPage";
 
 export default function App() {
   const { init } = useAuthStore();
@@ -62,6 +63,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <SessionPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/sessions/:id/summary"
+            element={
+              <ProtectedRoute>
+                <SummaryPage />
               </ProtectedRoute>
             }
           />
