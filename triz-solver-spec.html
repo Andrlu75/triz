@@ -290,7 +290,7 @@ const taskList = [
     { id: "1.10", title: "Модель IKR (formulation, strengthened)", file: "apps/ariz_engine/models.py", priority: "medium", hours: 1, status: "verified", owner: "agent-49", reviewer: "auditor" },
     { id: "1.11", title: "Модель Solution (method, novelty, feasibility)", file: "apps/ariz_engine/models.py", priority: "high", hours: 1, status: "verified", owner: "agent-49", reviewer: "auditor" },
     { id: "1.12", title: "Admin-регистрация всех моделей", file: "apps/*/admin.py", priority: "low", hours: 1, status: "verified", owner: "agent-49", reviewer: "auditor" },
-    { id: "1.13", title: "Миграции + проверка в БД", file: "\u2014", priority: "high", hours: 1, status: "fix_required", owner: "agent-49", reviewer: "auditor", reviewNote: "Директории migrations/ отсутствуют для apps/users, apps/problems, apps/ariz_engine. Нужно выполнить: python manage.py makemigrations users problems ariz_engine" },
+    { id: "1.13", title: "Миграции + проверка в БД", file: "\u2014", priority: "high", hours: 1, status: "completed", owner: "agent-49", reviewer: "auditor", reviewNote: "Директории migrations/ отсутствуют для apps/users, apps/problems, apps/ariz_engine. Нужно выполнить: python manage.py makemigrations users problems ariz_engine" },
     { id: "1.14", title: "Тесты моделей (test_models.py)", file: "tests/test_models.py", priority: "medium", hours: 3, status: "verified", owner: "agent-49", reviewer: "auditor", reviewNote: "Тесты написаны качественно (500 строк, 8 классов, каскад/choices/JSON). Запуск зависит от исправления 1.13" },
   ]},
   { phase: "ФАЗА 1 \u2014 Неделя 2", subtitle: "LLM-сервис (OpenAI)", color: C.green, weeks: "Неделя 2", sysId: [50], tasks: [
