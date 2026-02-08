@@ -1,0 +1,18 @@
+[
+  {"principle_number": 1, "paired_with_number": 5, "note": "Дробление <-> Объединение"},
+  {"principle_number": 2, "paired_with_number": 7, "note": "Вынесение <-> Матрёшка (вложение)"},
+  {"principle_number": 3, "paired_with_number": 33, "note": "Местное качество <-> Однородность"},
+  {"principle_number": 4, "paired_with_number": 14, "note": "Асимметрия <-> Сфероидальность"},
+  {"principle_number": 8, "paired_with_number": 12, "note": "Антивес <-> Эквипотенциальность"},
+  {"principle_number": 9, "paired_with_number": 10, "note": "Предварительное антидействие <-> Предварительное действие"},
+  {"principle_number": 13, "paired_with_number": 20, "note": "Наоборот <-> Непрерывность полезного действия"},
+  {"principle_number": 15, "paired_with_number": 16, "note": "Динамичность <-> Частичное/избыточное действие"},
+  {"principle_number": 19, "paired_with_number": 20, "note": "Периодическое действие <-> Непрерывность"},
+  {"principle_number": 21, "paired_with_number": 26, "note": "Проскок <-> Копирование"},
+  {"principle_number": 22, "paired_with_number": 11, "note": "Обратить вред в пользу <-> Заранее подложенная подушка"},
+  {"principle_number": 27, "paired_with_number": 34, "note": "Дешёвая недолговечность <-> Отброс и регенерация"},
+  {"principle_number": 29, "paired_with_number": 30, "note": "Пневмо/гидроконструкции <-> Гибкие оболочки"},
+  {"principle_number": 35, "paired_with_number": 36, "note": "Изменение параметров <-> Фазовые переходы"},
+  {"principle_number": 38, "paired_with_number": 39, "note": "Сильные окислители <-> Инертная среда"},
+  {"principle_number": 42, "paired_with_number": 45, "note": "Замена системы <-> Самоорганизация"}
+]
