@@ -78,7 +78,9 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--embeddings",
+            "--generate-embeddings",
             action="store_true",
+            dest="embeddings",
             help="Generate embeddings for effects and analog tasks via OpenAI API",
         )
         parser.add_argument(
@@ -404,30 +406,62 @@ class Command(BaseCommand):
         """Generate embeddings for effects and analog tasks using OpenAI API."""
         self.stdout.write("Generating embeddings...")
 
+        # Try to use OpenAIClient from llm_service, fall back to direct openai
+        openai_client = None
+        use_llm_service = False
+
         try:
             from apps.llm_service.client import OpenAIClient
-        except ImportError:
-            self.stderr.write(
-                self.style.WARNING(
-                    "OpenAIClient not available. Skipping embedding generation. "
-                    "Embeddings can be generated later with: "
-                    "python manage.py load_triz_data --embeddings"
-                )
+            openai_client = OpenAIClient()
+            use_llm_service = True
+            self.stdout.write("  Using apps.llm_service.client.OpenAIClient")
+        except (ImportError, Exception):
+            # Fall back to direct openai usage
+            api_key = getattr(settings, "OPENAI_API_KEY", "") or os.environ.get(
+                "OPENAI_API_KEY", ""
             )
-            return
+            if not api_key:
+                self.stderr.write(
+                    self.style.WARNING(
+                        "OPENAI_API_KEY not set. Skipping embedding generation. "
+                        "Set the key in settings or environment and re-run with "
+                        "--generate-embeddings."
+                    )
+                )
+                return
+            try:
+                from openai import OpenAI
+                openai_client = OpenAI(api_key=api_key)
+                self.stdout.write("  Using direct openai.OpenAI client")
+            except ImportError:
+                self.stderr.write(
+                    self.style.ERROR(
+                        "Neither llm_service nor openai package available. "
+                        "Install openai: pip install openai"
+                    )
+                )
+                return
 
-        client = OpenAIClient()
+        embedding_model = "text-embedding-3-small"
 
         # Generate embeddings for effects
         effects = TechnologicalEffect.objects.filter(embedding__isnull=True)
         if effects.exists():
             self.stdout.write(f"  Generating embeddings for {effects.count()} effects...")
-            for effect in effects:
+            for i, effect in enumerate(effects, 1):
                 text = f"{effect.name}: {effect.description}"
                 try:
-                    embedding = client.create_embedding(text)
+                    if use_llm_service:
+                        embedding = openai_client.create_embedding(text)
+                    else:
+                        response = openai_client.embeddings.create(
+                            input=[text], model=embedding_model
+                        )
+                        embedding = response.data[0].embedding
                     effect.embedding = embedding
                     effect.save(update_fields=["embedding"])
+                    if i % 10 == 0:
+                        self.stdout.write(f"    Progress: {i}/{effects.count()}")
                 except Exception as e:
                     logger.warning(
                         "Failed to generate embedding for effect %s: %s",
@@ -439,6 +473,7 @@ class Command(BaseCommand):
                             f"  Failed to generate embedding for effect: {effect.name}"
                         )
                     )
+                time.sleep(0.1)  # Rate limiting
             self.stdout.write(
                 self.style.SUCCESS("  Effect embeddings generated.")
             )
@@ -451,12 +486,23 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"  Generating embeddings for {analogs.count()} analog tasks..."
             )
-            for analog in analogs:
-                text = f"{analog.title}: {analog.op_formulation}"
+            for i, analog in enumerate(analogs, 1):
+                text = (
+                    f"{analog.title}: {analog.problem_description} "
+                    f"Contradiction: {analog.op_formulation}"
+                )
                 try:
-                    embedding = client.create_embedding(text)
+                    if use_llm_service:
+                        embedding = openai_client.create_embedding(text)
+                    else:
+                        response = openai_client.embeddings.create(
+                            input=[text], model=embedding_model
+                        )
+                        embedding = response.data[0].embedding
                     analog.embedding = embedding
                     analog.save(update_fields=["embedding"])
+                    if i % 10 == 0:
+                        self.stdout.write(f"    Progress: {i}/{analogs.count()}")
                 except Exception as e:
                     logger.warning(
                         "Failed to generate embedding for analog %s: %s",
@@ -468,6 +514,7 @@ class Command(BaseCommand):
                             f"  Failed to generate embedding for analog: {analog.title}"
                         )
                     )
+                time.sleep(0.1)  # Rate limiting
             self.stdout.write(
                 self.style.SUCCESS("  Analog task embeddings generated.")
             )
