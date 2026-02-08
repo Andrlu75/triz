@@ -10,7 +10,13 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from apps.ariz_engine.models import ARIZSession, StepResult
+from apps.ariz_engine.models import (
+    ARIZSession,
+    Contradiction,
+    IKR,
+    Solution,
+    StepResult,
+)
 from apps.problems.models import Problem
 from apps.users.models import User
 
@@ -449,6 +455,127 @@ class TestTaskStatus:
         assert resp.status_code == status.HTTP_200_OK
         assert resp.data["ready"] is True
         assert resp.data["result"]["status"] == "completed"
+
+    @patch("apps.ariz_engine.views.AsyncResult")
+    def test_task_status_failure(self, mock_async, auth_client, session):
+        mock_result = MagicMock()
+        mock_result.status = "FAILURE"
+        mock_result.ready.return_value = True
+        mock_result.successful.return_value = False
+        mock_async.return_value = mock_result
+
+        resp = auth_client.get(
+            f"/api/v1/sessions/{session.pk}/task/abc-def-789/"
+        )
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data["status"] == "FAILURE"
+        assert resp.data["ready"] is True
+        assert "result" not in resp.data
+
+
+class TestSessionSummaryWithData:
+    """Summary endpoint with contradictions, IKR, and solutions."""
+
+    def test_summary_with_rich_data(self, auth_client, problem):
+        start_resp = auth_client.post("/api/v1/sessions/start/", {
+            "problem_id": problem.pk,
+            "mode": "express",
+        })
+        session_id = start_resp.data["id"]
+        session = ARIZSession.objects.get(pk=session_id)
+
+        StepResult.objects.filter(session=session, step_code="1").update(
+            user_input="Pipe overheats",
+            llm_output="Analysis of overheating",
+            validated_result="Validated analysis",
+            status="completed",
+        )
+        Contradiction.objects.create(
+            session=session,
+            type="surface",
+            quality_a="Temperature",
+            quality_b="Efficiency",
+            formulation="If we increase cooling, efficiency drops.",
+        )
+        IKR.objects.create(
+            session=session,
+            formulation="The pipe cools itself without external devices.",
+        )
+        Solution.objects.create(
+            session=session,
+            method_used="principle",
+            title="Heat pipe structure",
+            description="Use internal heat pipes for self-cooling.",
+            novelty_score=9,
+            feasibility_score=7,
+        )
+
+        resp = auth_client.get(f"/api/v1/sessions/{session_id}/summary/")
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data["mode"] == "express"
+        assert resp.data["problem"]["title"] == "Overheating pipe"
+        assert len(resp.data["contradictions"]) == 1
+        assert resp.data["contradictions"][0]["type"] == "surface"
+        assert len(resp.data["ikrs"]) == 1
+        assert len(resp.data["solutions"]) == 1
+        assert resp.data["solutions"][0]["title"] == "Heat pipe structure"
+        assert resp.data["solutions"][0]["novelty_score"] == 9
+
+
+# ---------------------------------------------------------------------------
+# Unauthenticated access to session endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestSessionUnauthenticated:
+    """All session endpoints require authentication."""
+
+    def test_list_unauthenticated(self, api_client):
+        resp = api_client.get("/api/v1/sessions/")
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_start_unauthenticated(self, api_client):
+        resp = api_client.post("/api/v1/sessions/start/", {"problem_id": 1})
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_retrieve_unauthenticated(self, api_client, session):
+        resp = api_client.get(f"/api/v1/sessions/{session.pk}/")
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_submit_unauthenticated(self, api_client, session):
+        resp = api_client.post(
+            f"/api/v1/sessions/{session.pk}/submit/",
+            {"user_input": "test"},
+        )
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_advance_unauthenticated(self, api_client, session):
+        resp = api_client.post(f"/api/v1/sessions/{session.pk}/advance/")
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_back_unauthenticated(self, api_client, session):
+        resp = api_client.post(f"/api/v1/sessions/{session.pk}/back/")
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_summary_unauthenticated(self, api_client, session):
+        resp = api_client.get(f"/api/v1/sessions/{session.pk}/summary/")
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_progress_unauthenticated(self, api_client, session):
+        resp = api_client.get(f"/api/v1/sessions/{session.pk}/progress/")
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+# ---------------------------------------------------------------------------
+# Public endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestHealthCheck:
+    def test_health_check(self, api_client):
+        resp = api_client.get("/api/v1/health/")
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.json()["status"] == "ok"
 
 
 # ---------------------------------------------------------------------------
