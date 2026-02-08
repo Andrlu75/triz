@@ -29,8 +29,13 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "corsheaders",
     "django_celery_beat",
-    # Project apps (added by other agents)
+    # Project apps
+    "apps.users",
+    "apps.problems",
+    "apps.ariz_engine",
 ]
+
+AUTH_USER_MODEL = "users.User"
 
 # ---------- Middleware ----------
 MIDDLEWARE = [
