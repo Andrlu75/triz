@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.ariz_engine.models import ARIZSession
+from apps.users.permissions import CanGenerateReport
 
 from .generators import DOCXReportGenerator, PDFReportGenerator
 from .models import GeneratedReport
@@ -26,7 +27,7 @@ class BaseReportDownloadView(APIView):
     ``_get_generator()`` and ``_get_content_type()``.
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, CanGenerateReport]
     report_format = None
 
     def get(self, request, session_id):

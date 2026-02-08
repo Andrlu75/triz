@@ -32,6 +32,7 @@ from apps.ariz_engine.serializers import (
     SubmitStepSerializer,
 )
 from apps.problems.models import Problem
+from apps.users.permissions import CanUseMode
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 class SessionViewSet(GenericViewSet):
     """ViewSet for ARIZ session operations."""
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, CanUseMode]
 
     def get_queryset(self):
         return ARIZSession.objects.filter(

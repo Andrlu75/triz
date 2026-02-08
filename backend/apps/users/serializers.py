@@ -40,3 +40,13 @@ class OrganizationMembershipSerializer(serializers.ModelSerializer):
         model = OrganizationMembership
         fields = ["id", "user", "username", "organization", "role", "joined_at"]
         read_only_fields = ["id", "joined_at"]
+
+
+class AddMemberSerializer(serializers.Serializer):
+    """Validates input for adding a member to an organization."""
+
+    username = serializers.CharField()
+    role = serializers.ChoiceField(
+        choices=OrganizationMembership.ROLE_CHOICES,
+        default="member",
+    )

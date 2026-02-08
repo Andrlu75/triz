@@ -47,3 +47,13 @@ class ProblemShareSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+
+
+class ShareProblemInputSerializer(serializers.Serializer):
+    """Validates input for sharing a problem with another user."""
+
+    username = serializers.CharField()
+    permission = serializers.ChoiceField(
+        choices=ProblemShare.PERMISSION_CHOICES,
+        default="view",
+    )

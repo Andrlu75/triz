@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
-from rest_framework import status, viewsets
+from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -10,7 +10,9 @@ from apps.problems.serializers import (
     ProblemListSerializer,
     ProblemSerializer,
     ProblemShareSerializer,
+    ShareProblemInputSerializer,
 )
+from apps.users.permissions import CanCreateProblem
 
 User = get_user_model()
 
@@ -28,6 +30,8 @@ class ProblemViewSet(viewsets.ModelViewSet):
     GET    /api/v1/problems/{id}/shares/  — list shares for a problem
     """
 
+    permission_classes = [permissions.IsAuthenticated, CanCreateProblem]
+
     def get_serializer_class(self):
         if self.action == "list":
             return ProblemListSerializer
@@ -44,8 +48,12 @@ class ProblemViewSet(viewsets.ModelViewSet):
     def share(self, request, pk=None):
         """Share a problem with another user."""
         problem = get_object_or_404(Problem, pk=pk, user=request.user)
-        username = request.data.get("username")
-        permission = request.data.get("permission", "view")
+
+        input_serializer = ShareProblemInputSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        username = input_serializer.validated_data["username"]
+        permission = input_serializer.validated_data["permission"]
 
         target_user = get_object_or_404(User, username=username)
 

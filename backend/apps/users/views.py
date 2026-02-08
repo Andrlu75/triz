@@ -8,6 +8,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from apps.problems.models import ProblemShare
 from apps.users.models import Organization, OrganizationMembership
 from apps.users.serializers import (
+    AddMemberSerializer,
     OrganizationMembershipSerializer,
     OrganizationSerializer,
     RegisterSerializer,
@@ -61,6 +62,12 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         self.request.user.organization = org
         self.request.user.save(update_fields=["organization"])
 
+    def _is_org_admin(self, user, org):
+        """Return True if user has the 'admin' role in the given organization."""
+        return OrganizationMembership.objects.filter(
+            user=user, organization=org, role="admin"
+        ).exists()
+
     @action(detail=True, methods=["get", "post"], url_path="members")
     def members(self, request, pk=None):
         org = self.get_object()
@@ -72,9 +79,18 @@ class OrganizationViewSet(viewsets.ModelViewSet):
             serializer = OrganizationMembershipSerializer(memberships, many=True)
             return Response(serializer.data)
 
-        # POST — add member
-        username = request.data.get("username")
-        role = request.data.get("role", "member")
+        # POST — add member (admin only)
+        if not self._is_org_admin(request.user, org):
+            return Response(
+                {"detail": "Только администратор может управлять участниками."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        input_serializer = AddMemberSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        username = input_serializer.validated_data["username"]
+        role = input_serializer.validated_data["role"]
         user = get_object_or_404(User, username=username)
 
         membership, created = OrganizationMembership.objects.get_or_create(
@@ -101,6 +117,13 @@ class OrganizationViewSet(viewsets.ModelViewSet):
     )
     def remove_member(self, request, pk=None, user_id=None):
         org = self.get_object()
+
+        if not self._is_org_admin(request.user, org):
+            return Response(
+                {"detail": "Только администратор может управлять участниками."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         membership = get_object_or_404(
             OrganizationMembership, organization=org, user_id=user_id
         )

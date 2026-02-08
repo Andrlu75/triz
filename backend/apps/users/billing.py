@@ -1,16 +1,15 @@
 """
-Billing: plan limits and middleware for enforcing them.
+Billing: plan limits and utility functions for enforcing them.
 
 Plans:
     Free     — 5 problems/month, Express only
     Pro      — 50 problems/month, Express + Autopilot, reports
     Business — unlimited, all modes, teams, reports
-"""
-from datetime import timedelta
 
+Note: Enforcement is handled by DRF permission classes in
+``apps.users.permissions`` (CanCreateProblem, CanUseMode, CanGenerateReport).
+"""
 from django.utils import timezone
-from rest_framework import status
-from rest_framework.response import Response
 
 PLAN_LIMITS = {
     "free": {
@@ -71,63 +70,3 @@ def check_reports_allowed(user):
 def check_teams_allowed(user):
     """Return True if the user's plan includes team features."""
     return get_user_limits(user)["teams_enabled"]
-
-
-class PlanLimitMiddleware:
-    """
-    DRF-compatible middleware that checks plan limits on problem creation
-    and session start endpoints.
-
-    Attach via Django MIDDLEWARE setting.
-    """
-
-    def __init__(self, get_response):
-        self.get_response = get_response
-
-    def __call__(self, request):
-        response = self.get_response(request)
-        return response
-
-    def process_view(self, request, view_func, view_args, view_kwargs):
-        if not hasattr(request, "user") or not request.user.is_authenticated:
-            return None
-
-        path = request.path
-
-        # Check problem creation limit
-        if request.method == "POST" and "/api/v1/problems/" in path and path.endswith("/"):
-            if not path.endswith("/problems/"):
-                return None  # skip detail actions
-            if not check_problem_limit(request.user):
-                return Response(
-                    {
-                        "detail": "Превышен лимит задач для вашего тарифа.",
-                        "code": "plan_limit_exceeded",
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-        # Check mode on session start
-        if request.method == "POST" and "/sessions/start/" in path:
-            mode = getattr(request, "data", {}).get("mode", "express")
-            if not check_mode_allowed(request.user, mode):
-                return Response(
-                    {
-                        "detail": f'Режим "{mode}" недоступен для вашего тарифа.',
-                        "code": "mode_not_allowed",
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-        # Check report generation
-        if request.method == "POST" and "/reports/" in path:
-            if not check_reports_allowed(request.user):
-                return Response(
-                    {
-                        "detail": "Генерация отчётов недоступна для вашего тарифа.",
-                        "code": "reports_not_allowed",
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-        return None
