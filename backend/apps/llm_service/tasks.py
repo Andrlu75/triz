@@ -1,5 +1,8 @@
 """
 Celery tasks for async LLM processing of ARIZ steps.
+
+Integrates TRIZ knowledge base search (analog tasks, principles, effects)
+into solution-oriented steps to provide relevant context to the LLM.
 """
 import json
 import logging
@@ -9,11 +12,20 @@ from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
 
-from apps.ariz_engine.models import ARIZSession, StepResult
+from apps.ariz_engine.models import ARIZSession, Contradiction, StepResult
 from apps.llm_service.client import OpenAIClient
 from apps.llm_service.prompt_manager import PromptManager
 
 logger = logging.getLogger(__name__)
+
+# Steps where knowledge base enrichment should be applied.
+# These are solution-oriented steps in both Express and Full ARIZ modes.
+KNOWLEDGE_ENRICHMENT_STEPS = {
+    # Express mode: step 7 (Solution)
+    "7",
+    # Full ARIZ Part 4: Solution steps
+    "4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "4.7", "4.8",
+}
 
 
 def _build_context(session: ARIZSession, user_input: str) -> dict[str, Any]:
@@ -55,6 +67,142 @@ def _build_context(session: ARIZSession, user_input: str) -> dict[str, Any]:
         "previous_steps": previous_steps_data,
         "context_snapshot": session.context_snapshot or {},
     }
+
+
+def _enrich_context_with_knowledge(
+    session: ARIZSession,
+    step_code: str,
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Enrich the template context with relevant TRIZ knowledge base data.
+
+    For solution-oriented steps, searches for:
+    - Analog tasks matching the OP formulation
+    - Suggested inventive principles based on contradiction type
+    - Relevant technological effects
+
+    This data is added to the context dict under the 'knowledge' key,
+    making it available to Jinja2 prompt templates.
+
+    Args:
+        session: The current ARIZ session.
+        step_code: Current step code.
+        context: Existing template context dict.
+
+    Returns:
+        The context dict enriched with knowledge base data.
+    """
+    if step_code not in KNOWLEDGE_ENRICHMENT_STEPS:
+        return context
+
+    try:
+        from apps.knowledge_base.search import TRIZKnowledgeSearch
+
+        search = TRIZKnowledgeSearch()
+        knowledge: dict[str, Any] = {}
+
+        # 1. Search for analog tasks using OP formulation from context snapshot
+        snapshot = session.context_snapshot or {}
+        op_text = ""
+
+        # Try to extract OP formulation from various sources
+        steps_data = snapshot.get("steps", {})
+        # Express mode step 5 = OP, Full ARIZ step 3.1-3.6 = OP
+        for op_step in ("5", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6"):
+            if op_step in steps_data:
+                op_text = steps_data[op_step].get("result", "")
+                if op_text:
+                    break
+
+        # Also try contradiction model
+        if not op_text:
+            contradiction = (
+                Contradiction.objects.filter(
+                    session=session,
+                    type="sharpened",
+                )
+                .order_by("-id")
+                .first()
+            )
+            if contradiction:
+                op_text = contradiction.formulation
+
+        if op_text:
+            analogs = search.search_analog_tasks(op_formulation=op_text, top_k=5)
+            knowledge["analog_tasks"] = [
+                {
+                    "title": a.title,
+                    "problem": a.problem_description,
+                    "op_formulation": a.op_formulation,
+                    "solution": a.solution_principle,
+                    "domain": a.domain,
+                }
+                for a in analogs
+            ]
+            logger.info(
+                "Knowledge enrichment: found %d analog tasks for step %s",
+                len(analogs),
+                step_code,
+            )
+
+        # 2. Suggest principles based on contradiction type
+        contradiction = (
+            Contradiction.objects.filter(session=session)
+            .order_by("-id")
+            .first()
+        )
+        if contradiction:
+            principles = search.suggest_principles(
+                contradiction_type=contradiction.type,
+                formulation=contradiction.formulation,
+            )
+            knowledge["suggested_principles"] = [
+                {
+                    "number": p.number,
+                    "name": p.name,
+                    "description": p.description,
+                }
+                for p in principles
+            ]
+            logger.info(
+                "Knowledge enrichment: suggested %d principles for step %s",
+                len(principles),
+                step_code,
+            )
+
+        # 3. Search for relevant effects using problem description
+        problem_desc = context.get("problem_description", "")
+        if problem_desc:
+            effects = search.find_effects(
+                function_description=problem_desc,
+                top_k=5,
+            )
+            knowledge["relevant_effects"] = [
+                {
+                    "type": e.get_type_display(),
+                    "name": e.name,
+                    "description": e.description,
+                }
+                for e in effects
+            ]
+            logger.info(
+                "Knowledge enrichment: found %d effects for step %s",
+                len(effects),
+                step_code,
+            )
+
+        context["knowledge"] = knowledge
+
+    except Exception as exc:
+        logger.warning(
+            "Knowledge enrichment failed for step %s: %s. Proceeding without knowledge.",
+            step_code,
+            exc,
+        )
+        context["knowledge"] = {}
+
+    return context
 
 
 def _run_validation(
@@ -232,6 +380,9 @@ def execute_ariz_step(
     try:
         # 1. Build context
         context = _build_context(session, user_input)
+
+        # 1b. Enrich context with TRIZ knowledge base data
+        context = _enrich_context_with_knowledge(session, step_code, context)
 
         # 2. Render prompts
         prompt_manager = PromptManager()
