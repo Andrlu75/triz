@@ -353,10 +353,17 @@ pending → in_progress → completed → verified ✓
 - Писать тесты, указанные в плане
 - Запускать перед завершением: `pytest` (backend), `npm test` (frontend)
 
-### Коммиты
+### Коммиты и push
 
-- **Не коммитить** без запроса пользователя
-- **Не пушить** без явного разрешения
+- **После завершения каждой задачи** (все подзадачи `completed`) — сделать коммит и push:
+  ```
+  git add <свои файлы> triz-solver-spec.html
+  git commit -m "feat(#{sysId}): краткое описание выполненной работы"
+  git push
+  ```
+- **Формат коммита:** `feat(#48): настройка Docker и инфраструктуры проекта`
+- **Коммитить только свои файлы** + обновлённый `triz-solver-spec.html`
+- **Не коммитить** чужие файлы или файлы с секретами (`.env`)
 
 ### Общение
 
@@ -388,4 +395,6 @@ pending → in_progress → completed → verified ✓
 - [ ] Системная задача: `TaskUpdate(status="completed")`
 - [ ] Тесты проходят
 - [ ] Не осталось TODO/pass заглушек
+- [ ] Коммит: `git add <файлы> triz-solver-spec.html && git commit -m "feat(#{sysId}): ..."`
+- [ ] Push: `git push`
 - [ ] Задача готова к проверке аудитором
