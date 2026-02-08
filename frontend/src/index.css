@@ -13,12 +13,10 @@
     @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100;
   }
 
-  /* Default to dark mode based on system preference */
-  @media (prefers-color-scheme: dark) {
-    html:not(.light) {
-      @apply dark;
-    }
-  }
+  /*
+   * Dark mode is managed via the "dark" class on <html> (Tailwind darkMode: "class").
+   * System preference detection should be handled in JS, not via @apply.
+   */
 }
 
 @layer components {
